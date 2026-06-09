@@ -28,3 +28,14 @@ func TestPickProviderDefaultIgnoresUnavailablePreferred(t *testing.T) {
 		t.Fatalf("pickProviderDefault() = (%q, %q), want (deepseek, deepseek-v4-flash)", gotProvider, gotModel)
 	}
 }
+
+func TestPickProviderDefaultReturnsEmptyWithoutConfiguredProvider(t *testing.T) {
+	providers := []llm.ProviderConfig{
+		{ID: llm.ProviderDeepSeek, APIKey: "", Model: "deepseek-v4-flash"},
+	}
+
+	gotProvider, gotModel := pickProviderDefault(providers, llm.ProviderDeepSeek)
+	if gotProvider != "" || gotModel != "" {
+		t.Fatalf("pickProviderDefault() = (%q, %q), want empty default", gotProvider, gotModel)
+	}
+}
