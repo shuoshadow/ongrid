@@ -1781,7 +1781,33 @@ function CustomTargetEditor({
   const name = typeof target.name === 'string' ? target.name : id;
   const enabled = target.enabled !== false;
   const sampleLimit = typeof target.sample_limit === 'number' ? target.sample_limit : 5000;
+  const resource =
+    target.resource && typeof target.resource === 'object' && !Array.isArray(target.resource)
+      ? (target.resource as Record<string, unknown>)
+      : {};
+  const selectedResourceCategory = normalizeOptionalResourceCategory(resource.category);
+  const selectedDBType = normalizeOptionalDBType(resource.type);
   const setField = (key: string, value: unknown) => onChange({ ...target, [key]: value });
+  const setResourceCategory = (value: string) => {
+    const next = { ...target };
+    delete next.resource_type;
+    delete next.db_type;
+    if (value === 'database') {
+      next.resource = { ...resource, category: 'database', type: selectedDBType };
+    } else {
+      delete next.resource;
+    }
+    onChange(next);
+  };
+  const setDatabaseType = (value: string) => {
+    const next: Record<string, unknown> = {
+      ...target,
+      resource: { ...resource, category: 'database', type: value },
+    };
+    delete next.resource_type;
+    delete next.db_type;
+    onChange(next);
+  };
   return (
     <div className="rounded-md border border-zinc-800 bg-zinc-950/40 p-3">
       <div className="mb-3 flex items-center justify-between gap-3">
@@ -1848,6 +1874,48 @@ function CustomTargetEditor({
           emptyText={tr('—（可选，建议只放低基数字段）', '— (optional; use low-cardinality fields only)')}
         />
       </div>
+      <div className="mt-3 rounded-md border border-zinc-800 bg-zinc-900/30 p-3">
+        <div className="mb-3">
+          <div className="text-[12px] font-medium text-zinc-300">{tr('分类扩展', 'Classification')}</div>
+          <div className="mt-0.5 text-[11px] text-zinc-500">
+            {tr('可选。用于把通用 /metrics 端点归类成数据库等资源，方便首页对话按类型分析。', 'Optional. Classify a generic /metrics endpoint as a resource such as a database for Home chat analysis.')}
+          </div>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2">
+          <label>
+            <span className="mb-1 block text-xs text-zinc-400">resource.category</span>
+            <select
+              value={selectedResourceCategory}
+              onChange={(e) => setResourceCategory(e.target.value)}
+              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 font-mono text-[11px] text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            >
+              <option value="">{tr('不分类', 'Unclassified')}</option>
+              {RESOURCE_CATEGORY_OPTIONS.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          {selectedResourceCategory === 'database' && (
+            <label>
+              <span className="mb-1 block text-xs text-zinc-400">resource.type</span>
+              <select
+                value={selectedDBType}
+                onChange={(e) => setDatabaseType(e.target.value)}
+                className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 font-mono text-[11px] text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              >
+                <option value="">{tr('选择数据库类型', 'Select database type')}</option>
+                {DB_TYPE_OPTIONS.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.id}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -1875,6 +1943,12 @@ const DB_TYPE_OPTIONS = [
 
 type DBType = (typeof DB_TYPE_OPTIONS)[number]['id'];
 
+const RESOURCE_CATEGORY_OPTIONS = [
+  { id: 'database', label: 'database' },
+] as const;
+
+type ResourceCategory = (typeof RESOURCE_CATEGORY_OPTIONS)[number]['id'];
+
 const DB_LABEL_DROP_DEFAULT: Record<DBType, string[]> = {
   mysql: ['query', 'statement'],
   postgresql: ['query', 'statement'],
@@ -1889,30 +1963,61 @@ type ExporterOption = {
   label: string;
   hintZh: string;
   hintEn: string;
+  defaultValue?: boolean;
   risk?: 'normal' | 'high';
 };
 
 const MYSQL_EXPORTER_DEFAULT_COLLECTORS: string[] = [];
 
 const MYSQL_EXPORTER_COLLECTOR_OPTIONS: ExporterOption[] = [
-  { id: 'slave_status', label: 'slave_status', hintZh: 'SHOW SLAVE STATUS / 复制状态，默认已启用', hintEn: 'SHOW SLAVE STATUS / replication status; enabled by default' },
+  { id: 'global_status', label: 'global_status', hintZh: 'SHOW GLOBAL STATUS', hintEn: 'SHOW GLOBAL STATUS' },
+  { id: 'global_variables', label: 'global_variables', hintZh: 'SHOW GLOBAL VARIABLES', hintEn: 'SHOW GLOBAL VARIABLES' },
+  { id: 'slave_status', label: 'slave_status', hintZh: 'SHOW SLAVE STATUS / 复制状态', hintEn: 'SHOW SLAVE STATUS / replication status' },
   { id: 'slave_hosts', label: 'slave_hosts', hintZh: 'SHOW SLAVE HOSTS，用于复制拓扑', hintEn: 'SHOW SLAVE HOSTS for replication topology' },
-  { id: 'info_schema.replica_host', label: 'info_schema.replica_host', hintZh: 'replica_host_status 复制 host 指标', hintEn: 'replica_host_status replication host metrics' },
   { id: 'perf_schema.replication_group_members', label: 'perf_schema.replication_group_members', hintZh: 'Group Replication 成员状态', hintEn: 'Group Replication member status' },
   { id: 'perf_schema.replication_group_member_stats', label: 'perf_schema.replication_group_member_stats', hintZh: 'Group Replication 成员统计', hintEn: 'Group Replication member stats' },
   { id: 'perf_schema.replication_applier_status_by_worker', label: 'perf_schema.replication_applier_status_by_worker', hintZh: '复制 applier worker 状态', hintEn: 'Replication applier worker status' },
+  { id: 'info_schema.replica_host', label: 'info_schema.replica_host', hintZh: 'replica_host_status 复制 host 指标', hintEn: 'replica_host_status replication host metrics' },
+  { id: 'auto_increment.columns', label: 'auto_increment.columns', hintZh: '自增列容量', hintEn: 'Auto-increment column capacity' },
   { id: 'info_schema.processlist', label: 'info_schema.processlist', hintZh: '线程状态分布', hintEn: 'Thread state distribution' },
   { id: 'info_schema.tables', label: 'info_schema.tables', hintZh: '表级统计，可能增加基数', hintEn: 'Table-level stats; may increase cardinality', risk: 'high' },
-  { id: 'perf_schema.eventsstatements', label: 'perf_schema.eventsstatements', hintZh: 'SQL digest 统计，可能包含高基数语句摘要', hintEn: 'SQL digest stats; may add high-cardinality statement digests', risk: 'high' },
-  { id: 'perf_schema.tableiowaits', label: 'perf_schema.tableiowaits', hintZh: '表 IO wait 指标', hintEn: 'Table IO wait metrics', risk: 'high' },
-  { id: 'perf_schema.tablelocks', label: 'perf_schema.tablelocks', hintZh: '表锁等待指标', hintEn: 'Table lock wait metrics', risk: 'high' },
+  { id: 'info_schema.tablestats', label: 'info_schema.tablestats', hintZh: 'userstat 表级统计，高基数', hintEn: 'userstat table stats; high cardinality', risk: 'high' },
+  { id: 'info_schema.schemastats', label: 'info_schema.schemastats', hintZh: 'userstat schema 统计', hintEn: 'userstat schema stats' },
+  { id: 'info_schema.userstats', label: 'info_schema.userstats', hintZh: 'userstat 用户统计', hintEn: 'userstat user stats' },
+  { id: 'info_schema.clientstats', label: 'info_schema.clientstats', hintZh: 'userstat client 统计', hintEn: 'userstat client stats' },
   { id: 'info_schema.innodb_metrics', label: 'info_schema.innodb_metrics', hintZh: 'InnoDB 内部指标', hintEn: 'InnoDB internal metrics' },
-  { id: 'engine_innodb_status', label: 'engine_innodb_status', hintZh: 'SHOW ENGINE INNODB STATUS', hintEn: 'SHOW ENGINE INNODB STATUS' },
+  { id: 'info_schema.innodb_tablespaces', label: 'info_schema.innodb_tablespaces', hintZh: 'InnoDB tablespace 指标', hintEn: 'InnoDB tablespace metrics', risk: 'high' },
+  { id: 'info_schema.innodb_cmp', label: 'info_schema.innodb_cmp', hintZh: 'InnoDB compression 指标', hintEn: 'InnoDB compression metrics' },
+  { id: 'info_schema.innodb_cmpmem', label: 'info_schema.innodb_cmpmem', hintZh: 'InnoDB compression memory 指标', hintEn: 'InnoDB compression memory metrics' },
+  { id: 'info_schema.query_response_time', label: 'info_schema.query_response_time', hintZh: 'query_response_time 分布', hintEn: 'Query response time distribution' },
+  { id: 'info_schema.rocksdb_perf_context', label: 'info_schema.rocksdb_perf_context', hintZh: 'RocksDB perf context', hintEn: 'RocksDB perf context' },
+  { id: 'mysql.user', label: 'mysql.user', hintZh: 'mysql.user 账号统计', hintEn: 'mysql.user account stats', risk: 'high' },
+  { id: 'sys.user_summary', label: 'sys.user_summary', hintZh: 'sys user summary', hintEn: 'sys user summary' },
+  { id: 'perf_schema.eventsstatements', label: 'perf_schema.eventsstatements', hintZh: 'SQL digest 统计，可能包含高基数语句摘要', hintEn: 'SQL digest stats; may add high-cardinality statement digests', risk: 'high' },
+  { id: 'perf_schema.eventsstatementssum', label: 'perf_schema.eventsstatementssum', hintZh: 'SQL digest 汇总', hintEn: 'SQL digest grand sums', risk: 'high' },
+  { id: 'perf_schema.eventswaits', label: 'perf_schema.eventswaits', hintZh: '事件等待指标', hintEn: 'Event wait metrics' },
+  { id: 'perf_schema.tableiowaits', label: 'perf_schema.tableiowaits', hintZh: '表 IO wait 指标', hintEn: 'Table IO wait metrics', risk: 'high' },
+  { id: 'perf_schema.indexiowaits', label: 'perf_schema.indexiowaits', hintZh: '索引 IO wait 指标', hintEn: 'Index IO wait metrics', risk: 'high' },
+  { id: 'perf_schema.tablelocks', label: 'perf_schema.tablelocks', hintZh: '表锁等待指标', hintEn: 'Table lock wait metrics', risk: 'high' },
+  { id: 'perf_schema.file_events', label: 'perf_schema.file_events', hintZh: '文件事件指标', hintEn: 'File event metrics' },
+  { id: 'perf_schema.file_instances', label: 'perf_schema.file_instances', hintZh: '文件实例指标', hintEn: 'File instance metrics', risk: 'high' },
+  { id: 'perf_schema.memory_events', label: 'perf_schema.memory_events', hintZh: '内存事件指标', hintEn: 'Memory event metrics' },
   { id: 'binlog_size', label: 'binlog_size', hintZh: 'binlog 文件大小', hintEn: 'Binlog file size' },
   { id: 'heartbeat', label: 'heartbeat', hintZh: 'pt-heartbeat 延迟指标', hintEn: 'pt-heartbeat lag metrics' },
+  { id: 'engine_innodb_status', label: 'engine_innodb_status', hintZh: 'SHOW ENGINE INNODB STATUS', hintEn: 'SHOW ENGINE INNODB STATUS' },
+  { id: 'engine_tokudb_status', label: 'engine_tokudb_status', hintZh: 'SHOW ENGINE TOKUDB STATUS', hintEn: 'SHOW ENGINE TOKUDB STATUS' },
 ];
 
 const MYSQL_EXPORTER_COLLECTOR_SET = new Set(MYSQL_EXPORTER_COLLECTOR_OPTIONS.map((option) => option.id));
+
+const MYSQL_EXPORTER_BOOLEAN_OPTIONS: ExporterOption[] = [
+  { id: 'heartbeat_utc', label: 'heartbeat_utc', hintZh: 'pt-heartbeat 使用 UTC', hintEn: 'Use UTC for pt-heartbeat timestamps' },
+  { id: 'info_schema_processlist_processes_by_user', label: 'info_schema_processlist_processes_by_user', hintZh: 'processlist 按 user 聚合', hintEn: 'Aggregate processlist by user', risk: 'high' },
+  { id: 'info_schema_processlist_processes_by_host', label: 'info_schema_processlist_processes_by_host', hintZh: 'processlist 按 host 聚合', hintEn: 'Aggregate processlist by host', risk: 'high' },
+  { id: 'mysql_user_privileges', label: 'mysql_user_privileges', hintZh: '采集 mysql.user 权限字段', hintEn: 'Collect privilege fields from mysql.user', risk: 'high' },
+  { id: 'exporter_enable_lock_wait_timeout', label: 'exporter_enable_lock_wait_timeout', hintZh: '设置 lock_wait_timeout 避免元数据锁长等待', hintEn: 'Set lock_wait_timeout to avoid long metadata lock waits' },
+  { id: 'exporter_log_slow_filter', label: 'exporter_log_slow_filter', hintZh: '避免 scrape 进入慢日志；Oracle MySQL 不支持', hintEn: 'Avoid logging scrapes as slow queries; not supported by Oracle MySQL' },
+];
 
 const MONGODB_EXPORTER_DEFAULT_COLLECTORS = ['diagnosticdata', 'replicasetstatus', 'fcv'] as const;
 
@@ -2021,19 +2126,55 @@ const POSTGRES_EXPORTER_BOOLEAN_OPTIONS: ExporterOption[] = [
   { id: 'auto_discover_databases', label: 'auto_discover_databases', hintZh: '动态发现同实例数据库；适合多库实例', hintEn: 'Dynamically discover databases on the same instance' },
   { id: 'disable_default_metrics', label: 'disable_default_metrics', hintZh: '只采集自定义 queries.yaml', hintEn: 'Use only custom queries.yaml metrics' },
   { id: 'disable_settings_metrics', label: 'disable_settings_metrics', hintZh: '不采集 pg_settings', hintEn: 'Do not collect pg_settings metrics' },
+  { id: 'dumpmaps', label: 'dumpmaps', hintZh: '仅 dump metric map 调试；一般不要开启', hintEn: 'Dump metric maps for debugging; usually keep off' },
+];
+
+const POSTGRES_EXPORTER_COLLECTOR_OPTIONS: ExporterOption[] = [
+  { id: 'collector_database', label: 'collector_database', hintZh: 'database collector，默认开启', hintEn: 'Database collector; enabled by default', defaultValue: true },
+  { id: 'collector_database_wraparound', label: 'collector_database_wraparound', hintZh: '事务 ID wraparound 风险', hintEn: 'Transaction ID wraparound risk' },
+  { id: 'collector_locks', label: 'collector_locks', hintZh: '锁统计，默认开启', hintEn: 'Lock stats; enabled by default', defaultValue: true },
+  { id: 'collector_long_running_transactions', label: 'collector_long_running_transactions', hintZh: '长事务检测', hintEn: 'Long-running transaction detection' },
+  { id: 'collector_postmaster', label: 'collector_postmaster', hintZh: 'postmaster 启动时间', hintEn: 'Postmaster start time' },
+  { id: 'collector_process_idle', label: 'collector_process_idle', hintZh: 'idle process 指标', hintEn: 'Idle process metrics' },
+  { id: 'collector_replication', label: 'collector_replication', hintZh: '复制指标，默认开启', hintEn: 'Replication metrics; enabled by default', defaultValue: true },
+  { id: 'collector_replication_slot', label: 'collector_replication_slot', hintZh: 'replication slot 指标，默认开启', hintEn: 'Replication slot metrics; enabled by default', defaultValue: true },
+  { id: 'collector_roles', label: 'collector_roles', hintZh: 'role 指标，默认开启', hintEn: 'Role metrics; enabled by default', defaultValue: true },
+  { id: 'collector_stat_activity_autovacuum', label: 'collector_stat_activity_autovacuum', hintZh: 'autovacuum activity', hintEn: 'Autovacuum activity' },
+  { id: 'collector_stat_bgwriter', label: 'collector_stat_bgwriter', hintZh: 'bgwriter 指标，默认开启', hintEn: 'Bgwriter metrics; enabled by default', defaultValue: true },
+  { id: 'collector_stat_checkpointer', label: 'collector_stat_checkpointer', hintZh: 'checkpointer 指标', hintEn: 'Checkpointer metrics' },
+  { id: 'collector_stat_database', label: 'collector_stat_database', hintZh: 'database stats，默认开启', hintEn: 'Database stats; enabled by default', defaultValue: true },
+  { id: 'collector_stat_progress_vacuum', label: 'collector_stat_progress_vacuum', hintZh: 'vacuum 进度，默认开启', hintEn: 'Vacuum progress; enabled by default', defaultValue: true },
+  { id: 'collector_stat_statements', label: 'collector_stat_statements', hintZh: 'pg_stat_statements，可能包含高基数 SQL 维度', hintEn: 'pg_stat_statements; may include high-cardinality SQL dimensions', risk: 'high' },
+  { id: 'collector_stat_statements_include_query', label: 'collector_stat_statements_include_query', hintZh: 'stat_statements 包含 query 文本，高基数', hintEn: 'Include query text in stat_statements; high cardinality', risk: 'high' },
+  { id: 'collector_stat_user_tables', label: 'collector_stat_user_tables', hintZh: '用户表统计，默认开启', hintEn: 'User table stats; enabled by default', defaultValue: true, risk: 'high' },
+  { id: 'collector_stat_wal_receiver', label: 'collector_stat_wal_receiver', hintZh: 'standby WAL receiver 指标', hintEn: 'Standby WAL receiver metrics' },
+  { id: 'collector_statio_user_indexes', label: 'collector_statio_user_indexes', hintZh: '用户索引 IO 统计', hintEn: 'User index IO stats', risk: 'high' },
+  { id: 'collector_statio_user_tables', label: 'collector_statio_user_tables', hintZh: '用户表 IO 统计，默认开启', hintEn: 'User table IO stats; enabled by default', defaultValue: true, risk: 'high' },
+  { id: 'collector_wal', label: 'collector_wal', hintZh: 'WAL 指标，默认开启', hintEn: 'WAL metrics; enabled by default', defaultValue: true },
+  { id: 'collector_xlog_location', label: 'collector_xlog_location', hintZh: '旧版本 xlog location', hintEn: 'Legacy xlog location' },
+  { id: 'collector_buffercache_summary', label: 'collector_buffercache_summary', hintZh: 'pg_buffercache 汇总', hintEn: 'pg_buffercache summary', risk: 'high' },
 ];
 
 const REDIS_EXPORTER_BOOLEAN_OPTIONS: ExporterOption[] = [
   { id: 'is_cluster', label: 'is_cluster', hintZh: 'Redis Cluster 模式，用于 key 级采集时发现 cluster 节点', hintEn: 'Redis Cluster mode for key-level collection across cluster nodes' },
   { id: 'cluster_discover_hostnames', label: 'cluster_discover_hostnames', hintZh: 'cluster 节点发现使用 hostname', hintEn: 'Use hostnames when discovering cluster nodes' },
+  { id: 'append_instance_role_label', label: 'append_instance_role_label', hintZh: '追加 instance_role label 区分 master / replica', hintEn: 'Append instance_role label for master / replica' },
   { id: 'include_sentinel_peer_info', label: 'include_sentinel_peer_info', hintZh: 'Sentinel peer 信息，高基数', hintEn: 'Sentinel peer info; high cardinality', risk: 'high' },
   { id: 'include_config_metrics', label: 'include_config_metrics', hintZh: '采集 CONFIG 指标', hintEn: 'Collect CONFIG metrics' },
+  { id: 'include_go_runtime_metrics', label: 'include_go_runtime_metrics', hintZh: '采集 exporter Go runtime 指标', hintEn: 'Collect exporter Go runtime metrics' },
+  { id: 'include_metrics_for_empty_databases', label: 'include_metrics_for_empty_databases', hintZh: '空 DB 也输出 db_keys 等指标', hintEn: 'Emit db metrics for empty databases', defaultValue: true },
   { id: 'include_modules_metrics', label: 'include_modules_metrics', hintZh: '采集 Redis Modules 指标', hintEn: 'Collect Redis Modules metrics' },
   { id: 'include_search_indexes_metrics', label: 'include_search_indexes_metrics', hintZh: '采集 Redis Search index 指标', hintEn: 'Collect Redis Search index metrics', risk: 'high' },
   { id: 'include_system_metrics', label: 'include_system_metrics', hintZh: '采集 Redis system 指标', hintEn: 'Collect Redis system metrics' },
   { id: 'include_rdb_file_size_metric', label: 'include_rdb_file_size_metric', hintZh: '采集 RDB 文件大小；要求 exporter 能访问 RDB 文件', hintEn: 'Collect RDB file size; exporter must access the RDB file' },
   { id: 'export_client_list', label: 'export_client_list', hintZh: '采集 CLIENT LIST 指标', hintEn: 'Collect CLIENT LIST metrics', risk: 'high' },
   { id: 'export_client_port', label: 'export_client_port', hintZh: 'CLIENT LIST 增加 client port label，高基数', hintEn: 'Add client port label for CLIENT LIST; high cardinality', risk: 'high' },
+  { id: 'exclude_latency_histogram_metrics', label: 'exclude_latency_histogram_metrics', hintZh: '跳过 Redis 7 latency histogram', hintEn: 'Skip Redis 7 latency histogram metrics' },
+  { id: 'is_tile38', label: 'is_tile38', hintZh: 'Tile38 兼容指标', hintEn: 'Tile38-compatible metrics' },
+  { id: 'lua_script_read_only', label: 'lua_script_read_only', hintZh: 'Lua 扩展指标使用 EVAL_RO', hintEn: 'Use EVAL_RO for Lua metric scripts' },
+  { id: 'ping_on_connect', label: 'ping_on_connect', hintZh: '连接后执行 PING 并记录耗时', hintEn: 'PING after connect and record duration' },
+  { id: 'redis_only_metrics', label: 'redis_only_metrics', hintZh: '只输出 Redis 指标，省略 Go/process 指标', hintEn: 'Export only Redis metrics, omitting Go/process metrics' },
+  { id: 'set_client_name', label: 'set_client_name', hintZh: '连接 Redis 时设置 exporter client name', hintEn: 'Set exporter client name on Redis connections', defaultValue: true },
   { id: 'skip_checkkeys_for_role_master', label: 'skip_checkkeys_for_role_master', hintZh: 'master 角色跳过 key 扫描，降低生产压力', hintEn: 'Skip key scans on masters to reduce production load' },
   { id: 'streams_exclude_consumer_metrics', label: 'streams_exclude_consumer_metrics', hintZh: 'stream 采集时不暴露 consumer 维度', hintEn: 'Omit consumer metrics for stream checks' },
   { id: 'disable_exporting_key_values', label: 'disable_exporting_key_values', hintZh: 'key 检查不把 value 作为 label', hintEn: 'Do not export key values as labels' },
@@ -2044,6 +2185,9 @@ const MONGODB_EXPORTER_BOOLEAN_OPTIONS: ExporterOption[] = [
   { id: 'discovering_mode', label: 'discovering_mode', hintZh: '自动发现 collection，用于 collstats/indexstats 等', hintEn: 'Autodiscover collections for collstats/indexstats and related collectors', risk: 'high' },
   { id: 'compatible_mode', label: 'compatible_mode', hintZh: '同时暴露旧版兼容指标名', hintEn: 'Expose legacy compatible metric names as well' },
   { id: 'split_cluster', label: 'split_cluster', hintZh: '将集群中每个节点作为独立 target 处理', hintEn: 'Treat each cluster node as a separate target' },
+  { id: 'disable_direct_connect', label: 'disable_direct_connect', hintZh: '关闭 direct connect；多 host / SRV 连接需要', hintEn: 'Disable direct connect; needed for multi-host / SRV URIs' },
+  { id: 'mongodb_global_conn_pool', label: 'mongodb_global_conn_pool', hintZh: '使用全局连接池', hintEn: 'Use the global MongoDB connection pool' },
+  { id: 'disable_exporter_metrics', label: 'disable_exporter_metrics', hintZh: '不输出 exporter 自身 process/go 指标', hintEn: 'Do not expose exporter process/go metrics' },
   { id: 'collstats_enable_details', label: 'collstats_enable_details', hintZh: 'collStats 增加 index details / WiredTiger 细节', hintEn: 'Enable index details and WiredTiger details for collStats', risk: 'high' },
   { id: 'metrics_override_descending_index', label: 'metrics_override_descending_index', hintZh: '下降索引名兼容处理', hintEn: 'Override descending index names for metrics' },
 ];
@@ -2051,37 +2195,89 @@ const MONGODB_EXPORTER_BOOLEAN_OPTIONS: ExporterOption[] = [
 const EXPORTER_FIELD_SETS: Record<DBType, Set<string>> = {
   mysql: new Set([
     'collectors',
+    'exporter_enable_lock_wait_timeout',
+    'exporter_log_slow_filter',
     'heartbeat_utc',
     'heartbeat_database',
     'heartbeat_table',
+    'info_schema_processlist_processes_by_host',
+    'info_schema_processlist_processes_by_user',
     'info_schema_tables_databases',
     'info_schema_processlist_min_time',
+    'log_format',
+    'log_level',
+    'mysql_user_privileges',
+    'perf_schema_eventsstatements_exclude_schemas',
     'perf_schema_eventsstatements_limit',
     'perf_schema_eventsstatements_digest_text_limit',
     'perf_schema_eventsstatements_timelimit',
+    'perf_schema_file_instances_filter',
+    'perf_schema_file_instances_remove_prefix',
+    'perf_schema_memory_events_remove_prefix',
     'exporter_lock_wait_timeout',
-    'exporter_log_slow_filter',
+    'timeout_offset',
   ]),
   postgresql: new Set([
     'auto_discover_databases',
+    'collector_buffercache_summary',
+    'collector_database',
+    'collector_database_wraparound',
+    'collector_locks',
+    'collector_long_running_transactions',
+    'collector_postmaster',
+    'collector_process_idle',
+    'collector_replication',
+    'collector_replication_slot',
+    'collector_roles',
+    'collector_stat_activity_autovacuum',
+    'collector_stat_bgwriter',
+    'collector_stat_checkpointer',
+    'collector_stat_database',
+    'collector_stat_progress_vacuum',
+    'collector_stat_statements',
+    'collector_stat_statements_include_query',
+    'collector_stat_user_tables',
+    'collector_stat_wal_receiver',
+    'collector_statio_user_indexes',
+    'collector_statio_user_tables',
+    'collector_wal',
+    'collector_xlog_location',
+    'collection_timeout',
+    'config_file',
     'disable_default_metrics',
     'disable_settings_metrics',
+    'dumpmaps',
     'extend_query_path',
     'include_databases',
     'exclude_databases',
+    'log_format',
+    'log_level',
     'metric_prefix',
+    'stat_statements_exclude_databases',
+    'stat_statements_exclude_users',
+    'stat_statements_limit',
+    'stat_statements_query_length',
   ]),
   redis: new Set([
+    'append_instance_role_label',
     'is_cluster',
     'cluster_discover_hostnames',
     'include_sentinel_peer_info',
     'include_config_metrics',
+    'include_go_runtime_metrics',
+    'include_metrics_for_empty_databases',
     'include_modules_metrics',
     'include_search_indexes_metrics',
     'include_system_metrics',
     'include_rdb_file_size_metric',
     'export_client_list',
     'export_client_port',
+    'exclude_latency_histogram_metrics',
+    'is_tile38',
+    'lua_script_read_only',
+    'ping_on_connect',
+    'redis_only_metrics',
+    'set_client_name',
     'skip_checkkeys_for_role_master',
     'streams_exclude_consumer_metrics',
     'disable_exporting_key_values',
@@ -2096,6 +2292,9 @@ const EXPORTER_FIELD_SETS: Record<DBType, Set<string>> = {
     'max_distinct_key_groups',
     'config_command',
     'connection_timeout',
+    'log_format',
+    'log_level',
+    'namespace',
     'script',
   ]),
   mongodb: new Set([
@@ -2104,11 +2303,19 @@ const EXPORTER_FIELD_SETS: Record<DBType, Set<string>> = {
     'discovering_mode',
     'compatible_mode',
     'split_cluster',
+    'disable_direct_connect',
+    'disable_exporter_metrics',
+    'mongodb_global_conn_pool',
     'collstats_enable_details',
     'metrics_override_descending_index',
     'collstats_limit',
+    'mongodb_collstats_colls',
+    'mongodb_connect_timeout_ms',
+    'mongodb_indexstats_colls',
+    'log_level',
     'profile_time_ts',
     'currentopmetrics_slow_time',
+    'web_timeout_offset',
   ]),
 };
 
@@ -2265,6 +2472,48 @@ function validateCustomMetricsSpecBeforeSave(
       );
     }
     seenURLs[key] = id;
+    if (
+      (typeof target.resource_type === 'string' && target.resource_type.trim()) ||
+      (typeof target.db_type === 'string' && target.db_type.trim())
+    ) {
+      return tr(
+        `${id} 请使用 resource.category / resource.type，不要使用顶层 resource_type / db_type`,
+        `${id} must use resource.category / resource.type instead of top-level resource_type / db_type`,
+      );
+    }
+    if (!target.resource) {
+      continue;
+    }
+    if (typeof target.resource !== 'object' || Array.isArray(target.resource)) {
+      return tr(`${id} 的 resource 必须是对象`, `${id} resource must be an object`);
+    }
+    const resource = target.resource as Record<string, unknown>;
+    const rawCategory = typeof resource.category === 'string' ? resource.category.trim() : '';
+    const category = normalizeOptionalResourceCategory(rawCategory);
+    if (!rawCategory) {
+      return tr(`${id} 的 resource.category 必填`, `${id} resource.category is required`);
+    }
+    if (!category) {
+      return tr(
+        `${id} 的 resource.category ${rawCategory} 不支持`,
+        `${id} resource.category ${rawCategory} is not supported`,
+      );
+    }
+    if (category === 'database') {
+      const rawDBType = typeof resource.type === 'string' ? resource.type.trim() : '';
+      if (!rawDBType) {
+        return tr(
+          `${id} 选择 database 后必须选择 resource.type`,
+          `${id} must select resource.type when resource.category is database`,
+        );
+      }
+      if (!normalizeOptionalDBType(rawDBType)) {
+        return tr(
+          `${id} 的 resource.type ${rawDBType} 不支持`,
+          `${id} resource.type ${rawDBType} is not supported`,
+        );
+      }
+    }
   }
   return null;
 }
@@ -2349,6 +2598,16 @@ function normalizeDBType(value: unknown): DBType {
   return DB_TYPE_OPTIONS.some((option) => option.id === value) ? (value as DBType) : 'mysql';
 }
 
+function normalizeOptionalDBType(value: unknown): DBType | '' {
+  if (value === 'postgres' || value === 'pg') return 'postgresql';
+  if (value === 'mongo') return 'mongodb';
+  return DB_TYPE_OPTIONS.some((option) => option.id === value) ? (value as DBType) : '';
+}
+
+function normalizeOptionalResourceCategory(value: unknown): ResourceCategory | '' {
+  return RESOURCE_CATEGORY_OPTIONS.some((option) => option.id === value) ? (value as ResourceCategory) : '';
+}
+
 function databaseExporterConfig(source: Record<string, unknown>): Record<string, unknown> | null {
   return source.exporter && typeof source.exporter === 'object' && !Array.isArray(source.exporter)
     ? (source.exporter as Record<string, unknown>)
@@ -2362,8 +2621,9 @@ function databaseExporterCollectors(source: Record<string, unknown>, dbType: DBT
   return [...MONGODB_EXPORTER_DEFAULT_COLLECTORS];
 }
 
-function exporterBool(exporter: Record<string, unknown> | null, key: string): boolean {
+function exporterBool(exporter: Record<string, unknown> | null, key: string, defaultValue = false): boolean {
   const value = exporter?.[key];
+  if (value === undefined) return defaultValue;
   return value === true || (typeof value === 'string' && value.toLowerCase() === 'true');
 }
 
@@ -2377,6 +2637,25 @@ function exporterNumber(exporter: Record<string, unknown> | null, key: string): 
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string' && value.trim() && !Number.isNaN(Number(value))) return Number(value);
   return null;
+}
+
+function countDatabaseExporterAdvancedConfig(exporter: Record<string, unknown> | null): number {
+  if (!exporter) return 0;
+  let count = 0;
+  for (const [key, value] of Object.entries(exporter)) {
+    if (key === 'collectors') {
+      count += asStringArray(value).length;
+    } else if (Array.isArray(value)) {
+      count += value.filter((item) => typeof item === 'string' && item.trim() !== '').length;
+    } else if (typeof value === 'boolean') {
+      count += 1;
+    } else if (typeof value === 'number') {
+      if (Number.isFinite(value)) count += 1;
+    } else if (typeof value === 'string') {
+      if (value.trim() !== '') count += 1;
+    }
+  }
+  return count;
 }
 
 function stripDatabaseMetricCredentials(spec: Record<string, unknown>): Record<string, unknown> {
@@ -2773,6 +3052,48 @@ function SpecSection({
   );
 }
 
+function CollapsibleSpecSection({
+  title,
+  description,
+  configuredCount,
+  children,
+}: {
+  title: string;
+  description?: string;
+  configuredCount?: number;
+  children: ReactNode;
+}) {
+  const { tr } = useI18n();
+  const [open, setOpen] = useState(false);
+  return (
+    <section className="space-y-3 border-t border-zinc-800/70 pt-4 first:border-t-0 first:pt-0">
+      <button
+        type="button"
+        onClick={() => setOpen((next) => !next)}
+        aria-expanded={open}
+        className="flex w-full items-start justify-between gap-4 rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-left hover:border-zinc-700"
+      >
+        <span className="min-w-0">
+          <span className="flex flex-wrap items-center gap-2">
+            <span className="text-[12px] font-medium text-zinc-200">{title}</span>
+            {!!configuredCount && (
+              <span className="rounded border border-zinc-700 px-1.5 py-0.5 text-[10px] text-zinc-400">
+                {tr('已配置', 'Configured')} {configuredCount}
+              </span>
+            )}
+          </span>
+          {description && <span className="mt-0.5 block text-[11px] text-zinc-500">{description}</span>}
+        </span>
+        <span className="inline-flex shrink-0 items-center gap-1 rounded-md border border-zinc-700 px-2 py-1 text-[11px] text-zinc-300">
+          {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+          {open ? tr('收起', 'Collapse') : tr('展开', 'Expand')}
+        </span>
+      </button>
+      {open && <div className="space-y-3">{children}</div>}
+    </section>
+  );
+}
+
 function DatabaseExporterAdvancedSection({
   dbType,
   source,
@@ -2784,6 +3105,7 @@ function DatabaseExporterAdvancedSection({
 }) {
   const { tr } = useI18n();
   const exporter = databaseExporterConfig(source) ?? {};
+  const configuredCount = countDatabaseExporterAdvancedConfig(exporter);
   const setExporter = (next: Record<string, unknown>) => onChange({ ...source, exporter: next });
   const setExporterField = (key: string, value: unknown) => {
     const next = { ...exporter };
@@ -2798,12 +3120,13 @@ function DatabaseExporterAdvancedSection({
 
   if (dbType === 'mysql') {
     return (
-      <SpecSection
+      <CollapsibleSpecSection
         title={tr('高级采集', 'Advanced collection')}
         description={tr(
           '按需开启 MySQL 复制、Performance Schema、Information Schema 等 collector；高基数 collector 需要配合 sample_limit 和 label_drop。',
           'Enable MySQL replication, Performance Schema, and Information Schema collectors as needed. Pair high-cardinality collectors with sample_limit and label_drop.',
         )}
+        configuredCount={configuredCount}
       >
         <ExporterCollectorField
           values={databaseExporterCollectors(source, dbType)}
@@ -2812,67 +3135,105 @@ function DatabaseExporterAdvancedSection({
           emptyHint={tr('默认使用 exporter 内置基础 collector；这里用于额外开启高级 collector。', 'The exporter default collectors stay active; use this to enable extra advanced collectors.')}
           onChange={setCollectors}
         />
+        <ExporterBooleanGrid options={MYSQL_EXPORTER_BOOLEAN_OPTIONS} exporter={exporter} onChange={setExporterField} />
         <div className="grid gap-3 md:grid-cols-3">
+          <SpecInput label="heartbeat_database" value={exporterString(exporter, 'heartbeat_database')} placeholder="heartbeat" onChange={(v) => setExporterField('heartbeat_database', v)} />
+          <SpecInput label="heartbeat_table" value={exporterString(exporter, 'heartbeat_table')} placeholder="heartbeat" onChange={(v) => setExporterField('heartbeat_table', v)} />
           <SpecInput label="info_schema_tables_databases" value={exporterString(exporter, 'info_schema_tables_databases')} placeholder="*" onChange={(v) => setExporterField('info_schema_tables_databases', v)} />
+          <SpecInput label="perf_schema_file_instances_filter" value={exporterString(exporter, 'perf_schema_file_instances_filter')} placeholder=".*" onChange={(v) => setExporterField('perf_schema_file_instances_filter', v)} />
+          <SpecInput label="perf_schema_file_instances_remove_prefix" value={exporterString(exporter, 'perf_schema_file_instances_remove_prefix')} placeholder="/var/lib/mysql/" onChange={(v) => setExporterField('perf_schema_file_instances_remove_prefix', v)} />
+          <SpecInput label="perf_schema_memory_events_remove_prefix" value={exporterString(exporter, 'perf_schema_memory_events_remove_prefix')} placeholder="memory/" onChange={(v) => setExporterField('perf_schema_memory_events_remove_prefix', v)} />
+          <SpecInput label="timeout_offset" value={exporterString(exporter, 'timeout_offset')} placeholder="0.25" onChange={(v) => setExporterField('timeout_offset', v)} />
+          <SpecInput label="log_level" value={exporterString(exporter, 'log_level')} placeholder="info" onChange={(v) => setExporterField('log_level', v)} />
+          <SpecInput label="log_format" value={exporterString(exporter, 'log_format')} placeholder="logfmt" onChange={(v) => setExporterField('log_format', v)} />
           <SpecNumberInput label="info_schema_processlist_min_time" value={exporterNumber(exporter, 'info_schema_processlist_min_time') ?? 0} onChange={(v) => setExporterField('info_schema_processlist_min_time', v)} />
           <SpecNumberInput label="perf_schema_eventsstatements_limit" value={exporterNumber(exporter, 'perf_schema_eventsstatements_limit') ?? 250} onChange={(v) => setExporterField('perf_schema_eventsstatements_limit', v)} />
+          <SpecNumberInput label="perf_schema_eventsstatements_digest_text_limit" value={exporterNumber(exporter, 'perf_schema_eventsstatements_digest_text_limit') ?? 120} onChange={(v) => setExporterField('perf_schema_eventsstatements_digest_text_limit', v)} />
+          <SpecNumberInput label="perf_schema_eventsstatements_timelimit" value={exporterNumber(exporter, 'perf_schema_eventsstatements_timelimit') ?? 86400} onChange={(v) => setExporterField('perf_schema_eventsstatements_timelimit', v)} />
+          <SpecNumberInput label="exporter_lock_wait_timeout" value={exporterNumber(exporter, 'exporter_lock_wait_timeout') ?? 2} onChange={(v) => setExporterField('exporter_lock_wait_timeout', v)} />
         </div>
-      </SpecSection>
+        <StringListField
+          label="perf_schema_eventsstatements_exclude_schemas"
+          values={asStringArray(exporter.perf_schema_eventsstatements_exclude_schemas)}
+          placeholder="app_archive"
+          onChange={(next) => setExporterField('perf_schema_eventsstatements_exclude_schemas', next)}
+          emptyText={tr('—（只使用 exporter 默认排除项）', '— (use exporter defaults only)')}
+        />
+      </CollapsibleSpecSection>
     );
   }
 
   if (dbType === 'postgresql') {
     return (
-      <SpecSection
+      <CollapsibleSpecSection
         title={tr('高级采集', 'Advanced collection')}
-        description={tr('配置 PostgreSQL 多库发现、自定义 queries.yaml 和默认指标开关。', 'Configure PostgreSQL database discovery, custom queries.yaml, and default metric switches.')}
+        description={tr('配置 PostgreSQL collector、多库发现、自定义 queries.yaml 和 stat_statements 采集。', 'Configure PostgreSQL collectors, database discovery, custom queries.yaml, and stat_statements collection.')}
+        configuredCount={configuredCount}
       >
         <ExporterBooleanGrid options={POSTGRES_EXPORTER_BOOLEAN_OPTIONS} exporter={exporter} onChange={setExporterField} />
+        <ExporterBooleanGrid options={POSTGRES_EXPORTER_COLLECTOR_OPTIONS} exporter={exporter} onChange={setExporterField} />
         <div className="grid gap-3 md:grid-cols-3">
+          <SpecInput label="config_file" value={exporterString(exporter, 'config_file')} placeholder="/etc/ongrid-edge/postgres_exporter.yml" onChange={(v) => setExporterField('config_file', v)} />
           <SpecInput label="extend_query_path" value={exporterString(exporter, 'extend_query_path')} placeholder="/etc/ongrid-edge/postgres-queries.yaml" onChange={(v) => setExporterField('extend_query_path', v)} />
           <SpecInput label="metric_prefix" value={exporterString(exporter, 'metric_prefix')} placeholder="pg" onChange={(v) => setExporterField('metric_prefix', v)} />
+          <SpecInput label="collection_timeout" value={exporterString(exporter, 'collection_timeout')} placeholder="1m" onChange={(v) => setExporterField('collection_timeout', v)} />
+          <SpecInput label="log_level" value={exporterString(exporter, 'log_level')} placeholder="info" onChange={(v) => setExporterField('log_level', v)} />
+          <SpecInput label="log_format" value={exporterString(exporter, 'log_format')} placeholder="logfmt" onChange={(v) => setExporterField('log_format', v)} />
+          <SpecNumberInput label="stat_statements_limit" value={exporterNumber(exporter, 'stat_statements_limit') ?? 100} onChange={(v) => setExporterField('stat_statements_limit', v)} />
+          <SpecNumberInput label="stat_statements_query_length" value={exporterNumber(exporter, 'stat_statements_query_length') ?? 120} onChange={(v) => setExporterField('stat_statements_query_length', v)} />
         </div>
         <div className="grid gap-3 md:grid-cols-2">
           <StringListField label="include_databases" values={asStringArray(exporter.include_databases)} placeholder="app" onChange={(next) => setExporterField('include_databases', next)} emptyText={tr('—（不限制）', '— (no include filter)')} />
           <StringListField label="exclude_databases" values={asStringArray(exporter.exclude_databases)} placeholder="template0" onChange={(next) => setExporterField('exclude_databases', next)} emptyText={tr('—（不排除）', '— (no exclude filter)')} />
+          <StringListField label="stat_statements_exclude_databases" values={asStringArray(exporter.stat_statements_exclude_databases)} placeholder="postgres" onChange={(next) => setExporterField('stat_statements_exclude_databases', next)} emptyText={tr('—（不排除 database）', '— (no database exclusion)')} />
+          <StringListField label="stat_statements_exclude_users" values={asStringArray(exporter.stat_statements_exclude_users)} placeholder="app_user" onChange={(next) => setExporterField('stat_statements_exclude_users', next)} emptyText={tr('—（不排除 user）', '— (no user exclusion)')} />
         </div>
-      </SpecSection>
+      </CollapsibleSpecSection>
     );
   }
 
   if (dbType === 'redis') {
     return (
-      <SpecSection
+      <CollapsibleSpecSection
         title={tr('高级采集', 'Advanced collection')}
         description={tr(
           '配置 Redis Cluster / Sentinel / key scan / stream / module 等高级采集。key scan 类配置可能增加 Redis 压力。',
           'Configure Redis Cluster, Sentinel, key scan, stream, module, and other advanced collection. Key scan settings can add Redis load.',
         )}
+        configuredCount={configuredCount}
       >
         <ExporterBooleanGrid options={REDIS_EXPORTER_BOOLEAN_OPTIONS} exporter={exporter} onChange={setExporterField} />
         <div className="grid gap-3 md:grid-cols-3">
           <SpecInput label="check_keys" value={exporterString(exporter, 'check_keys')} placeholder="session:*" onChange={(v) => setExporterField('check_keys', v)} />
           <SpecInput label="check_single_keys" value={exporterString(exporter, 'check_single_keys')} placeholder="queue:depth" onChange={(v) => setExporterField('check_single_keys', v)} />
+          <SpecInput label="check_key_groups" value={exporterString(exporter, 'check_key_groups')} placeholder="user:[0-9]+:*" onChange={(v) => setExporterField('check_key_groups', v)} />
           <SpecInput label="count_keys" value={exporterString(exporter, 'count_keys')} placeholder="db0=session:*" onChange={(v) => setExporterField('count_keys', v)} />
           <SpecInput label="check_streams" value={exporterString(exporter, 'check_streams')} placeholder="stream:*" onChange={(v) => setExporterField('check_streams', v)} />
+          <SpecInput label="check_single_streams" value={exporterString(exporter, 'check_single_streams')} placeholder="orders" onChange={(v) => setExporterField('check_single_streams', v)} />
           <SpecInput label="check_search_indexes" value={exporterString(exporter, 'check_search_indexes')} placeholder=".*" onChange={(v) => setExporterField('check_search_indexes', v)} />
+          <SpecInput label="config_command" value={exporterString(exporter, 'config_command')} placeholder="CONFIG" onChange={(v) => setExporterField('config_command', v)} />
+          <SpecInput label="connection_timeout" value={exporterString(exporter, 'connection_timeout')} placeholder="15s" onChange={(v) => setExporterField('connection_timeout', v)} />
+          <SpecInput label="log_level" value={exporterString(exporter, 'log_level')} placeholder="INFO" onChange={(v) => setExporterField('log_level', v)} />
+          <SpecInput label="log_format" value={exporterString(exporter, 'log_format')} placeholder="txt" onChange={(v) => setExporterField('log_format', v)} />
+          <SpecInput label="namespace" value={exporterString(exporter, 'namespace')} placeholder="redis" onChange={(v) => setExporterField('namespace', v)} />
           <SpecInput label="script" value={exporterString(exporter, 'script')} placeholder="/etc/ongrid-edge/redis-metrics.lua" onChange={(v) => setExporterField('script', v)} />
         </div>
         <div className="grid gap-3 md:grid-cols-2">
           <SpecNumberInput label="check_keys_batch_size" value={exporterNumber(exporter, 'check_keys_batch_size') ?? 1000} onChange={(v) => setExporterField('check_keys_batch_size', v)} />
           <SpecNumberInput label="max_distinct_key_groups" value={exporterNumber(exporter, 'max_distinct_key_groups') ?? 100} onChange={(v) => setExporterField('max_distinct_key_groups', v)} />
         </div>
-      </SpecSection>
+      </CollapsibleSpecSection>
     );
   }
 
   return (
-    <SpecSection
+    <CollapsibleSpecSection
       title={tr('高级采集', 'Advanced collection')}
       description={tr(
         '选择 MongoDB exporter collector，并配置集群发现、兼容模式和高基数 collector 参数。',
         'Select MongoDB exporter collectors and configure cluster discovery, compatibility mode, and high-cardinality collector settings.',
       )}
+      configuredCount={configuredCount}
     >
       <ExporterCollectorField
         values={databaseExporterCollectors(source, dbType)}
@@ -2885,12 +3246,31 @@ function DatabaseExporterAdvancedSection({
         onChange={setCollectors}
       />
       <ExporterBooleanGrid options={MONGODB_EXPORTER_BOOLEAN_OPTIONS} exporter={exporter} onChange={setExporterField} />
+      <div className="grid gap-3 md:grid-cols-2">
+        <StringListField
+          label="mongodb_collstats_colls"
+          values={asStringArray(exporter.mongodb_collstats_colls)}
+          placeholder="db.collection"
+          onChange={(next) => setExporterField('mongodb_collstats_colls', next)}
+          emptyText={tr('—（不限制 $collStats collection）', '— (no $collStats collection allowlist)')}
+        />
+        <StringListField
+          label="mongodb_indexstats_colls"
+          values={asStringArray(exporter.mongodb_indexstats_colls)}
+          placeholder="db.collection"
+          onChange={(next) => setExporterField('mongodb_indexstats_colls', next)}
+          emptyText={tr('—（不限制 $indexStats collection）', '— (no $indexStats collection allowlist)')}
+        />
+      </div>
       <div className="grid gap-3 md:grid-cols-3">
         <SpecNumberInput label="collstats_limit" value={exporterNumber(exporter, 'collstats_limit') ?? 0} onChange={(v) => setExporterField('collstats_limit', v)} />
+        <SpecNumberInput label="mongodb_connect_timeout_ms" value={exporterNumber(exporter, 'mongodb_connect_timeout_ms') ?? 5000} onChange={(v) => setExporterField('mongodb_connect_timeout_ms', v)} />
         <SpecNumberInput label="profile_time_ts" value={exporterNumber(exporter, 'profile_time_ts') ?? 30} onChange={(v) => setExporterField('profile_time_ts', v)} />
+        <SpecNumberInput label="web_timeout_offset" value={exporterNumber(exporter, 'web_timeout_offset') ?? 1} onChange={(v) => setExporterField('web_timeout_offset', v)} />
         <SpecInput label="currentopmetrics_slow_time" value={exporterString(exporter, 'currentopmetrics_slow_time')} placeholder="5m" onChange={(v) => setExporterField('currentopmetrics_slow_time', v)} />
+        <SpecInput label="log_level" value={exporterString(exporter, 'log_level')} placeholder="error" onChange={(v) => setExporterField('log_level', v)} />
       </div>
-    </SpecSection>
+    </CollapsibleSpecSection>
   );
 }
 
@@ -2910,7 +3290,7 @@ function ExporterBooleanGrid({
         <label key={option.id} className="flex gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 hover:border-zinc-700">
           <input
             type="checkbox"
-            checked={exporterBool(exporter, option.id)}
+            checked={exporterBool(exporter, option.id, option.defaultValue)}
             onChange={(e) => onChange(option.id, e.target.checked)}
             className="mt-0.5 h-3.5 w-3.5 rounded border-zinc-700 bg-zinc-900"
           />

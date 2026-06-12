@@ -336,6 +336,11 @@ func sanitizeDatabaseMetricsExporter(i int, dbType string, raw interface{}) (map
 			if err != nil || !ok {
 				return nil, fmt.Errorf("%w: databasemetrics.sources[%d].exporter.%s must be an array", errs.ErrInvalid, i, key)
 			}
+			for _, item := range items {
+				if strings.ContainsAny(item, "\r\n") {
+					return nil, fmt.Errorf("%w: databasemetrics.sources[%d].exporter.%s must not contain newlines", errs.ErrInvalid, i, key)
+				}
+			}
 			out[key] = stringSliceInterface(items)
 		default:
 			return nil, fmt.Errorf("%w: databasemetrics.sources[%d].exporter.%s is not supported for %s", errs.ErrInvalid, i, key, dbType)
@@ -357,13 +362,14 @@ type databaseMetricsExporterFieldMaps struct {
 func databaseMetricsExporterFields(dbType string) databaseMetricsExporterFieldMaps {
 	switch dbType {
 	case "mysql":
-		return databaseMetricsExporterFieldMaps{bools: mysqlDatabaseMetricsBoolExporterFields, strings: mysqlDatabaseMetricsStringExporterFields, ints: mysqlDatabaseMetricsIntExporterFields}
+		return databaseMetricsExporterFieldMaps{bools: mysqlDatabaseMetricsBoolExporterFields, strings: mysqlDatabaseMetricsStringExporterFields, ints: mysqlDatabaseMetricsIntExporterFields, lists: mysqlDatabaseMetricsListExporterFields}
 	case "postgresql":
-		return databaseMetricsExporterFieldMaps{bools: postgresDatabaseMetricsBoolExporterFields, strings: postgresDatabaseMetricsStringExporterFields, lists: postgresDatabaseMetricsListExporterFields}
+		return databaseMetricsExporterFieldMaps{bools: postgresDatabaseMetricsBoolExporterFields, strings: postgresDatabaseMetricsStringExporterFields, ints: postgresDatabaseMetricsIntExporterFields, lists: postgresDatabaseMetricsListExporterFields}
 	case "redis":
 		return databaseMetricsExporterFieldMaps{bools: redisDatabaseMetricsBoolExporterFields, strings: redisDatabaseMetricsStringExporterFields, ints: redisDatabaseMetricsIntExporterFields}
 	case "mongodb":
-		return databaseMetricsExporterFieldMaps{bools: mongoDBDatabaseMetricsBoolExporterFields, strings: mongoDBDatabaseMetricsStringExporterFields, ints: mongoDBDatabaseMetricsIntExporterFields}
+		bools := mergeDatabaseMetricsStringMaps(mongoDBDatabaseMetricsBoolExporterFields, mongoDBDatabaseMetricsNoBoolExporterFields)
+		return databaseMetricsExporterFieldMaps{bools: bools, strings: mongoDBDatabaseMetricsStringExporterFields, ints: mongoDBDatabaseMetricsIntExporterFields, lists: mongoDBDatabaseMetricsListExporterFields}
 	default:
 		return databaseMetricsExporterFieldMaps{}
 	}
@@ -378,6 +384,16 @@ func databaseMetricsExporterCollectors(dbType string) map[string]struct{} {
 	default:
 		return map[string]struct{}{}
 	}
+}
+
+func mergeDatabaseMetricsStringMaps(maps ...map[string]string) map[string]string {
+	out := map[string]string{}
+	for _, items := range maps {
+		for key, value := range items {
+			out[key] = value
+		}
+	}
+	return out
 }
 
 var mysqlDatabaseMetricsCollectorSet = map[string]struct{}{
@@ -420,16 +436,24 @@ var mysqlDatabaseMetricsCollectorSet = map[string]struct{}{
 }
 
 var mysqlDatabaseMetricsBoolExporterFields = map[string]string{
-	"heartbeat_utc": "collect.heartbeat.utc",
+	"exporter_enable_lock_wait_timeout":         "exporter.enable_lock_wait_timeout",
+	"exporter_log_slow_filter":                  "exporter.log_slow_filter",
+	"heartbeat_utc":                             "collect.heartbeat.utc",
+	"info_schema_processlist_processes_by_host": "collect.info_schema.processlist.processes_by_host",
+	"info_schema_processlist_processes_by_user": "collect.info_schema.processlist.processes_by_user",
+	"mysql_user_privileges":                     "collect.mysql.user.privileges",
 }
 
 var mysqlDatabaseMetricsStringExporterFields = map[string]string{
 	"heartbeat_database":                       "collect.heartbeat.database",
 	"heartbeat_table":                          "collect.heartbeat.table",
 	"info_schema_tables_databases":             "collect.info_schema.tables.databases",
+	"log_format":                               "log.format",
+	"log_level":                                "log.level",
+	"perf_schema_file_instances_filter":        "collect.perf_schema.file_instances.filter",
 	"perf_schema_file_instances_remove_prefix": "collect.perf_schema.file_instances.remove_prefix",
 	"perf_schema_memory_events_remove_prefix":  "collect.perf_schema.memory_events.remove_prefix",
-	"exporter_log_slow_filter":                 "exporter.log_slow_filter",
+	"timeout_offset":                           "timeout-offset",
 }
 
 var mysqlDatabaseMetricsIntExporterFields = map[string]string{
@@ -440,43 +464,84 @@ var mysqlDatabaseMetricsIntExporterFields = map[string]string{
 	"exporter_lock_wait_timeout":                     "exporter.lock_wait_timeout",
 }
 
+var mysqlDatabaseMetricsListExporterFields = map[string]string{
+	"perf_schema_eventsstatements_exclude_schemas": "collect.perf_schema.eventsstatements.exclude_schemas",
+}
+
 var postgresDatabaseMetricsBoolExporterFields = map[string]string{
-	"auto_discover_databases":  "auto-discover-databases",
-	"disable_default_metrics":  "disable-default-metrics",
-	"disable_settings_metrics": "disable-settings-metrics",
-	"dumpmaps":                 "dumpmaps",
+	"auto_discover_databases":                 "auto-discover-databases",
+	"collector_buffercache_summary":           "collector.buffercache_summary",
+	"collector_database":                      "collector.database",
+	"collector_database_wraparound":           "collector.database_wraparound",
+	"collector_locks":                         "collector.locks",
+	"collector_long_running_transactions":     "collector.long_running_transactions",
+	"collector_postmaster":                    "collector.postmaster",
+	"collector_process_idle":                  "collector.process_idle",
+	"collector_replication":                   "collector.replication",
+	"collector_replication_slot":              "collector.replication_slot",
+	"collector_roles":                         "collector.roles",
+	"collector_stat_activity_autovacuum":      "collector.stat_activity_autovacuum",
+	"collector_stat_bgwriter":                 "collector.stat_bgwriter",
+	"collector_stat_checkpointer":             "collector.stat_checkpointer",
+	"collector_stat_database":                 "collector.stat_database",
+	"collector_stat_progress_vacuum":          "collector.stat_progress_vacuum",
+	"collector_stat_statements":               "collector.stat_statements",
+	"collector_stat_statements_include_query": "collector.stat_statements.include_query",
+	"collector_stat_user_tables":              "collector.stat_user_tables",
+	"collector_stat_wal_receiver":             "collector.stat_wal_receiver",
+	"collector_statio_user_indexes":           "collector.statio_user_indexes",
+	"collector_statio_user_tables":            "collector.statio_user_tables",
+	"collector_wal":                           "collector.wal",
+	"collector_xlog_location":                 "collector.xlog_location",
+	"disable_default_metrics":                 "disable-default-metrics",
+	"disable_settings_metrics":                "disable-settings-metrics",
+	"dumpmaps":                                "dumpmaps",
 }
 
 var postgresDatabaseMetricsStringExporterFields = map[string]string{
-	"extend_query_path": "extend.query-path",
-	"metric_prefix":     "metric-prefix",
+	"collection_timeout": "collection-timeout",
+	"config_file":        "config.file",
+	"extend_query_path":  "extend.query-path",
+	"log_format":         "log.format",
+	"log_level":          "log.level",
+	"metric_prefix":      "metric-prefix",
+}
+
+var postgresDatabaseMetricsIntExporterFields = map[string]string{
+	"stat_statements_limit":        "collector.stat_statements.limit",
+	"stat_statements_query_length": "collector.stat_statements.query_length",
 }
 
 var postgresDatabaseMetricsListExporterFields = map[string]string{
-	"include_databases": "include-databases",
-	"exclude_databases": "exclude-databases",
+	"exclude_databases":                 "exclude-databases",
+	"include_databases":                 "include-databases",
+	"stat_statements_exclude_databases": "collector.stat_statements.exclude_databases",
+	"stat_statements_exclude_users":     "collector.stat_statements.exclude_users",
 }
 
 var redisDatabaseMetricsBoolExporterFields = map[string]string{
-	"append_instance_role_label":        "append-instance-role-label",
-	"cluster_discover_hostnames":        "cluster-discover-hostnames",
-	"disable_exporting_key_values":      "disable-exporting-key-values",
-	"exclude_latency_histogram_metrics": "exclude-latency-histogram-metrics",
-	"export_client_list":                "export-client-list",
-	"export_client_port":                "export-client-port",
-	"include_config_metrics":            "include-config-metrics",
-	"include_go_runtime_metrics":        "include-go-runtime-metrics",
-	"include_modules_metrics":           "include-modules-metrics",
-	"include_rdb_file_size_metric":      "include-rdb-file-size-metric",
-	"include_search_indexes_metrics":    "include-search-indexes-metrics",
-	"include_sentinel_peer_info":        "include-sentinel-peer-info",
-	"include_system_metrics":            "include-system-metrics",
-	"is_cluster":                        "is-cluster",
-	"lua_script_read_only":              "lua-script-read-only",
-	"ping_on_connect":                   "ping-on-connect",
-	"redis_only_metrics":                "redis-only-metrics",
-	"skip_checkkeys_for_role_master":    "skip-checkkeys-for-role-master",
-	"streams_exclude_consumer_metrics":  "streams-exclude-consumer-metrics",
+	"append_instance_role_label":          "append-instance-role-label",
+	"cluster_discover_hostnames":          "cluster-discover-hostnames",
+	"disable_exporting_key_values":        "disable-exporting-key-values",
+	"exclude_latency_histogram_metrics":   "exclude-latency-histogram-metrics",
+	"export_client_list":                  "export-client-list",
+	"export_client_port":                  "export-client-port",
+	"include_config_metrics":              "include-config-metrics",
+	"include_go_runtime_metrics":          "include-go-runtime-metrics",
+	"include_metrics_for_empty_databases": "include-metrics-for-empty-databases",
+	"include_modules_metrics":             "include-modules-metrics",
+	"include_rdb_file_size_metric":        "include-rdb-file-size-metric",
+	"include_search_indexes_metrics":      "include-search-indexes-metrics",
+	"include_sentinel_peer_info":          "include-sentinel-peer-info",
+	"include_system_metrics":              "include-system-metrics",
+	"is_cluster":                          "is-cluster",
+	"is_tile38":                           "is-tile38",
+	"lua_script_read_only":                "lua-script-read-only",
+	"ping_on_connect":                     "ping-on-connect",
+	"redis_only_metrics":                  "redis-only-metrics",
+	"set_client_name":                     "set-client-name",
+	"skip_checkkeys_for_role_master":      "skip-checkkeys-for-role-master",
+	"streams_exclude_consumer_metrics":    "streams-exclude-consumer-metrics",
 }
 
 var redisDatabaseMetricsStringExporterFields = map[string]string{
@@ -491,6 +556,7 @@ var redisDatabaseMetricsStringExporterFields = map[string]string{
 	"count_keys":           "count-keys",
 	"log_format":           "log-format",
 	"log_level":            "log-level",
+	"namespace":            "namespace",
 	"script":               "script",
 }
 
@@ -503,8 +569,14 @@ var mongoDBDatabaseMetricsBoolExporterFields = map[string]string{
 	"collstats_enable_details":          "collector.collstats-enable-details",
 	"compatible_mode":                   "compatible-mode",
 	"discovering_mode":                  "discovering-mode",
+	"mongodb_global_conn_pool":          "mongodb.global-conn-pool",
 	"metrics_override_descending_index": "metrics.overridedescendingindex",
 	"split_cluster":                     "split-cluster",
+}
+
+var mongoDBDatabaseMetricsNoBoolExporterFields = map[string]string{
+	"disable_direct_connect":   "mongodb.direct-connect",
+	"disable_exporter_metrics": "collector.exporter-metrics",
 }
 
 var mongoDBDatabaseMetricsStringExporterFields = map[string]string{
@@ -513,8 +585,15 @@ var mongoDBDatabaseMetricsStringExporterFields = map[string]string{
 }
 
 var mongoDBDatabaseMetricsIntExporterFields = map[string]string{
-	"collstats_limit": "collector.collstats-limit",
-	"profile_time_ts": "collector.profile-time-ts",
+	"collstats_limit":            "collector.collstats-limit",
+	"mongodb_connect_timeout_ms": "mongodb.connect-timeout-ms",
+	"profile_time_ts":            "collector.profile-time-ts",
+	"web_timeout_offset":         "web.timeout-offset",
+}
+
+var mongoDBDatabaseMetricsListExporterFields = map[string]string{
+	"mongodb_collstats_colls":  "mongodb.collstats-colls",
+	"mongodb_indexstats_colls": "mongodb.indexstats-colls",
 }
 
 var mongoDBDatabaseMetricsCollectorSet = map[string]struct{}{
@@ -991,7 +1070,7 @@ func validateDatabaseMetricsExporterString(key, value string) error {
 		return nil
 	}
 	switch key {
-	case "extend_query_path", "script":
+	case "config_file", "extend_query_path", "script":
 		if !filepath.IsAbs(value) {
 			return fmt.Errorf("must be an absolute edge-local path")
 		}

@@ -150,7 +150,10 @@ func TestListDatabaseSources_FromPluginConfigs(t *testing.T) {
 							"name":         "Redis exporter",
 							"enabled":      true,
 							"source_label": "custom:redis-exporter",
-							"extra_labels": map[string]interface{}{"db_type": "redis"},
+							"resource": map[string]interface{}{
+								"category": "database",
+								"type":     "redis",
+							},
 						},
 					},
 				},
@@ -494,8 +497,9 @@ func TestAnalyzeDatabaseStatus_CustomMetricsDatabaseTarget(t *testing.T) {
 						map[string]interface{}{
 							"id":      "redis-exporter",
 							"enabled": true,
-							"extra_labels": map[string]interface{}{
-								"db_type": "redis",
+							"resource": map[string]interface{}{
+								"category": "database",
+								"type":     "redis",
 							},
 						},
 					},

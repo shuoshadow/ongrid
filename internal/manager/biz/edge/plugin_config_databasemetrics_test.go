@@ -414,6 +414,19 @@ func intValueForTest(v interface{}) int {
 	}
 }
 
+func interfaceStringSliceEqual(v interface{}, want []string) bool {
+	items, ok := v.([]interface{})
+	if !ok || len(items) != len(want) {
+		return false
+	}
+	for i, item := range items {
+		if item != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestBuildDatabaseMetricsTLSRejectsRelativePath(t *testing.T) {
 	_, err := buildDatabaseMetricsSecret("postgresql", map[string]interface{}{
 		"host":        "127.0.0.1",
@@ -558,9 +571,17 @@ func TestSetDatabaseMetricsKeepsAdvancedExporterOptionsForFourDBs(t *testing.T) 
 					"listen_address": "127.0.0.1:19104",
 					"connection":     map[string]interface{}{"type": "managed", "secret_set": true},
 					"exporter": map[string]interface{}{
-						"collectors":                         []interface{}{"perf_schema.replication_group_members", "perf_schema.eventsstatements"},
-						"info_schema_tables_databases":       "*",
-						"perf_schema_eventsstatements_limit": 50,
+						"collectors":               []interface{}{"perf_schema.replication_group_members", "perf_schema.eventsstatements"},
+						"exporter_log_slow_filter": true,
+						"heartbeat_utc":            false,
+						"info_schema_processlist_processes_by_user":    true,
+						"info_schema_tables_databases":                 "*",
+						"log_format":                                   "json",
+						"log_level":                                    "debug",
+						"perf_schema_eventsstatements_exclude_schemas": []interface{}{"tmp", "archive"},
+						"perf_schema_eventsstatements_limit":           50,
+						"perf_schema_file_instances_filter":            "^/var/lib/mysql/",
+						"timeout_offset":                               "0.5",
 					},
 				},
 				map[string]interface{}{
@@ -569,9 +590,18 @@ func TestSetDatabaseMetricsKeepsAdvancedExporterOptionsForFourDBs(t *testing.T) 
 					"listen_address": "127.0.0.1:19187",
 					"connection":     map[string]interface{}{"type": "managed", "secret_set": true},
 					"exporter": map[string]interface{}{
-						"auto_discover_databases": true,
-						"extend_query_path":       "/etc/ongrid-edge/postgres-queries.yaml",
-						"include_databases":       []interface{}{"app", "billing"},
+						"auto_discover_databases":                 true,
+						"collection_timeout":                      "45s",
+						"collector_database":                      false,
+						"collector_stat_statements":               true,
+						"collector_stat_statements_include_query": true,
+						"config_file":                             "/etc/ongrid-edge/postgres_exporter.yml",
+						"extend_query_path":                       "/etc/ongrid-edge/postgres-queries.yaml",
+						"include_databases":                       []interface{}{"app", "billing"},
+						"log_format":                              "json",
+						"log_level":                               "debug",
+						"stat_statements_exclude_users":           []interface{}{"postgres"},
+						"stat_statements_limit":                   500,
 					},
 				},
 				map[string]interface{}{
@@ -580,10 +610,17 @@ func TestSetDatabaseMetricsKeepsAdvancedExporterOptionsForFourDBs(t *testing.T) 
 					"listen_address": "127.0.0.1:19121",
 					"connection":     map[string]interface{}{"type": "managed", "secret_set": true},
 					"exporter": map[string]interface{}{
-						"is_cluster":                 true,
-						"include_sentinel_peer_info": true,
-						"check_keys":                 "session:*",
-						"check_keys_batch_size":      2000,
+						"append_instance_role_label":          true,
+						"is_cluster":                          true,
+						"include_metrics_for_empty_databases": true,
+						"include_sentinel_peer_info":          true,
+						"set_client_name":                     false,
+						"check_keys":                          "session:*",
+						"check_keys_batch_size":               2000,
+						"check_single_streams":                "orders",
+						"log_format":                          "json",
+						"log_level":                           "DEBUG",
+						"namespace":                           "redis_custom",
 					},
 				},
 				map[string]interface{}{
@@ -592,10 +629,18 @@ func TestSetDatabaseMetricsKeepsAdvancedExporterOptionsForFourDBs(t *testing.T) 
 					"listen_address": "127.0.0.1:19216",
 					"connection":     map[string]interface{}{"type": "managed", "secret_set": true},
 					"exporter": map[string]interface{}{
-						"collectors":       []interface{}{"diagnosticdata", "shards"},
-						"discovering_mode": true,
-						"split_cluster":    true,
-						"collstats_limit":  200,
+						"collectors":                 []interface{}{"diagnosticdata", "shards"},
+						"disable_direct_connect":     true,
+						"disable_exporter_metrics":   true,
+						"discovering_mode":           true,
+						"mongodb_collstats_colls":    []interface{}{"app.orders", "app.users"},
+						"mongodb_connect_timeout_ms": 7000,
+						"mongodb_global_conn_pool":   true,
+						"mongodb_indexstats_colls":   []interface{}{"app.orders"},
+						"split_cluster":              true,
+						"collstats_limit":            200,
+						"log_level":                  "debug",
+						"web_timeout_offset":         2,
 					},
 				},
 			},
@@ -606,19 +651,55 @@ func TestSetDatabaseMetricsKeepsAdvancedExporterOptionsForFourDBs(t *testing.T) 
 	}
 	sources := row.Spec["sources"].([]interface{})
 	mysqlExporter := sources[0].(map[string]interface{})["exporter"].(map[string]interface{})
-	if mysqlExporter["info_schema_tables_databases"] != "*" || intValueForTest(mysqlExporter["perf_schema_eventsstatements_limit"]) != 50 {
+	if mysqlExporter["info_schema_tables_databases"] != "*" ||
+		mysqlExporter["exporter_log_slow_filter"] != true ||
+		mysqlExporter["heartbeat_utc"] != false ||
+		mysqlExporter["info_schema_processlist_processes_by_user"] != true ||
+		mysqlExporter["log_format"] != "json" ||
+		mysqlExporter["log_level"] != "debug" ||
+		mysqlExporter["perf_schema_file_instances_filter"] != "^/var/lib/mysql/" ||
+		mysqlExporter["timeout_offset"] != "0.5" ||
+		intValueForTest(mysqlExporter["perf_schema_eventsstatements_limit"]) != 50 ||
+		!interfaceStringSliceEqual(mysqlExporter["perf_schema_eventsstatements_exclude_schemas"], []string{"tmp", "archive"}) {
 		t.Fatalf("mysql exporter = %#v", mysqlExporter)
 	}
 	pgExporter := sources[1].(map[string]interface{})["exporter"].(map[string]interface{})
-	if pgExporter["auto_discover_databases"] != true || pgExporter["extend_query_path"] != "/etc/ongrid-edge/postgres-queries.yaml" {
+	if pgExporter["auto_discover_databases"] != true ||
+		pgExporter["collector_database"] != false ||
+		pgExporter["collector_stat_statements"] != true ||
+		pgExporter["collector_stat_statements_include_query"] != true ||
+		pgExporter["collection_timeout"] != "45s" ||
+		pgExporter["config_file"] != "/etc/ongrid-edge/postgres_exporter.yml" ||
+		pgExporter["extend_query_path"] != "/etc/ongrid-edge/postgres-queries.yaml" ||
+		pgExporter["log_format"] != "json" ||
+		pgExporter["log_level"] != "debug" ||
+		intValueForTest(pgExporter["stat_statements_limit"]) != 500 ||
+		!interfaceStringSliceEqual(pgExporter["include_databases"], []string{"app", "billing"}) ||
+		!interfaceStringSliceEqual(pgExporter["stat_statements_exclude_users"], []string{"postgres"}) {
 		t.Fatalf("postgres exporter = %#v", pgExporter)
 	}
 	redisExporter := sources[2].(map[string]interface{})["exporter"].(map[string]interface{})
-	if redisExporter["is_cluster"] != true || intValueForTest(redisExporter["check_keys_batch_size"]) != 2000 {
+	if redisExporter["append_instance_role_label"] != true ||
+		redisExporter["is_cluster"] != true ||
+		redisExporter["include_metrics_for_empty_databases"] != true ||
+		redisExporter["set_client_name"] != false ||
+		redisExporter["log_format"] != "json" ||
+		redisExporter["log_level"] != "DEBUG" ||
+		redisExporter["namespace"] != "redis_custom" ||
+		intValueForTest(redisExporter["check_keys_batch_size"]) != 2000 {
 		t.Fatalf("redis exporter = %#v", redisExporter)
 	}
 	mongoExporter := sources[3].(map[string]interface{})["exporter"].(map[string]interface{})
-	if mongoExporter["discovering_mode"] != true || intValueForTest(mongoExporter["collstats_limit"]) != 200 {
+	if mongoExporter["disable_direct_connect"] != true ||
+		mongoExporter["disable_exporter_metrics"] != true ||
+		mongoExporter["discovering_mode"] != true ||
+		mongoExporter["mongodb_global_conn_pool"] != true ||
+		mongoExporter["log_level"] != "debug" ||
+		intValueForTest(mongoExporter["collstats_limit"]) != 200 ||
+		intValueForTest(mongoExporter["mongodb_connect_timeout_ms"]) != 7000 ||
+		intValueForTest(mongoExporter["web_timeout_offset"]) != 2 ||
+		!interfaceStringSliceEqual(mongoExporter["mongodb_collstats_colls"], []string{"app.orders", "app.users"}) ||
+		!interfaceStringSliceEqual(mongoExporter["mongodb_indexstats_colls"], []string{"app.orders"}) {
 		t.Fatalf("mongo exporter = %#v", mongoExporter)
 	}
 }
@@ -683,30 +764,41 @@ func TestSetDatabaseMetricsRejectsWrongExporterFieldForDBType(t *testing.T) {
 }
 
 func TestSetDatabaseMetricsRejectsRelativeExporterPath(t *testing.T) {
-	repo := newFakePluginConfigRepo()
-	uc := NewPluginConfigUC(repo, nil, fakeEndpointResolver{}, nil)
+	tests := []struct {
+		name string
+		key  string
+	}{
+		{name: "extend query path", key: "extend_query_path"},
+		{name: "config file", key: "config_file"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := newFakePluginConfigRepo()
+			uc := NewPluginConfigUC(repo, nil, fakeEndpointResolver{}, nil)
 
-	_, err := uc.Set(context.Background(), 7, model.PluginNameDatabaseMetrics, SetInput{
-		Enabled: true,
-		Spec: map[string]interface{}{
-			"sources": []interface{}{
-				map[string]interface{}{
-					"id":             "pg-prod",
-					"db_type":        "postgresql",
-					"listen_address": "127.0.0.1:19187",
-					"connection":     map[string]interface{}{"type": "managed", "secret_set": true},
-					"exporter": map[string]interface{}{
-						"extend_query_path": "queries.yaml",
+			_, err := uc.Set(context.Background(), 7, model.PluginNameDatabaseMetrics, SetInput{
+				Enabled: true,
+				Spec: map[string]interface{}{
+					"sources": []interface{}{
+						map[string]interface{}{
+							"id":             "pg-prod",
+							"db_type":        "postgresql",
+							"listen_address": "127.0.0.1:19187",
+							"connection":     map[string]interface{}{"type": "managed", "secret_set": true},
+							"exporter": map[string]interface{}{
+								tt.key: "queries.yaml",
+							},
+						},
 					},
 				},
-			},
-		},
-	})
-	if err == nil {
-		t.Fatal("Set() error = nil, want relative path error")
-	}
-	if !strings.Contains(err.Error(), "must be an absolute edge-local path") {
-		t.Fatalf("Set() error = %v", err)
+			})
+			if err == nil {
+				t.Fatal("Set() error = nil, want relative path error")
+			}
+			if !strings.Contains(err.Error(), "must be an absolute edge-local path") {
+				t.Fatalf("Set() error = %v", err)
+			}
+		})
 	}
 }
 

@@ -67,7 +67,7 @@ var AnalyzeDatabaseStatusSchema = json.RawMessage(`{
     },
     "include_custommetrics": {
       "type": "boolean",
-      "description": "Include custommetrics targets tagged with extra_labels.db_type. Default true."
+      "description": "Include custommetrics targets with resource.category=database and resource.type set to mysql/postgresql/redis/mongodb. Default true."
     },
     "include_disabled": {
       "type": "boolean",
@@ -98,7 +98,7 @@ var ListDatabaseSourcesSchema = json.RawMessage(`{
     },
     "include_custommetrics": {
       "type": "boolean",
-      "description": "Include custommetrics targets tagged with extra_labels.db_type. Default true."
+      "description": "Include custommetrics targets with resource.category=database and resource.type set to mysql/postgresql/redis/mongodb. Default true."
     },
     "include_disabled": {
       "type": "boolean",
@@ -679,8 +679,11 @@ func discoverCustomMetricSources(c databaseDeviceCandidate, row edgebiz.PluginRo
 		if id == "" {
 			continue
 		}
-		extra := mapFromMap(m, "extra_labels")
-		dbType := normalizeDBType(stringFromMap(extra, "db_type"))
+		resource := mapFromMap(m, "resource")
+		if normalizeDatabaseResourceCategory(stringFromMap(resource, "category")) != "database" {
+			continue
+		}
+		dbType := normalizeDBType(stringFromMap(resource, "type"))
 		if !isSupportedDatabaseType(dbType) {
 			continue
 		}
@@ -2362,6 +2365,17 @@ func normalizeDBType(v string) string {
 		return "postgresql"
 	case "mongo":
 		return "mongodb"
+	default:
+		return strings.ToLower(strings.TrimSpace(v))
+	}
+}
+
+func normalizeDatabaseResourceCategory(v string) string {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "":
+		return ""
+	case "database":
+		return "database"
 	default:
 		return strings.ToLower(strings.TrimSpace(v))
 	}

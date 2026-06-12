@@ -74,6 +74,20 @@ func parseTarget(i int, m map[string]interface{}) (metricscommon.Target, error) 
 		source = "custom:" + id
 	}
 	auth := mapFrom(m, "auth")
+	extraLabels := stringMap(m, "extra_labels")
+	resourceCategory, dbType, err := targetResourceClassification(m)
+	if err != nil {
+		return metricscommon.Target{}, fmt.Errorf("targets[%d].resource: %w", i, err)
+	}
+	kind := "custom"
+	if resourceCategory == "database" {
+		if extraLabels == nil {
+			extraLabels = map[string]string{}
+		}
+		extraLabels["resource_category"] = resourceCategory
+		extraLabels["db_type"] = dbType
+		kind = dbType
+	}
 	t := metricscommon.Target{
 		ID:            id,
 		Name:          firstNonEmpty(stringFrom(m, "name"), id),
@@ -86,15 +100,73 @@ func parseTarget(i int, m map[string]interface{}) (metricscommon.Target, error) 
 		BasicUsername: stringFrom(auth, "username"),
 		BasicPassword: stringFrom(auth, "password"),
 		SourceLabel:   source,
-		ExtraLabels:   stringMap(m, "extra_labels"),
+		ExtraLabels:   extraLabels,
 		SampleLimit:   intFrom(m, "sample_limit", 5000),
 		LabelDrop:     stringSlice(m, "label_drop"),
-		Kind:          "custom",
+		Kind:          kind,
 	}
 	if t.SampleLimit < 0 {
 		return metricscommon.Target{}, fmt.Errorf("targets[%d].sample_limit must be >= 0", i)
 	}
 	return t, nil
+}
+
+func targetResourceClassification(m map[string]interface{}) (category, dbType string, err error) {
+	raw, ok := m["resource"]
+	if !ok || raw == nil {
+		return "", "", nil
+	}
+	resource, ok := raw.(map[string]interface{})
+	if !ok {
+		return "", "", fmt.Errorf("must be an object")
+	}
+	category = normalizeResourceCategory(stringFrom(resource, "category"))
+	if category == "" {
+		return "", "", fmt.Errorf("category required")
+	}
+	if category != "database" {
+		return "", "", fmt.Errorf("unsupported category %q", stringFrom(resource, "category"))
+	}
+	rawDBType := stringFrom(resource, "type")
+	if rawDBType == "" {
+		return "", "", fmt.Errorf("database type required")
+	}
+	dbType = normalizeDatabaseType(rawDBType)
+	if !isSupportedDatabaseType(dbType) {
+		return "", "", fmt.Errorf("unsupported database type %q", rawDBType)
+	}
+	return category, dbType, nil
+}
+
+func normalizeResourceCategory(v string) string {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "":
+		return ""
+	case "database":
+		return "database"
+	default:
+		return strings.ToLower(strings.TrimSpace(v))
+	}
+}
+
+func normalizeDatabaseType(v string) string {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "postgres", "pg":
+		return "postgresql"
+	case "mongo":
+		return "mongodb"
+	default:
+		return strings.ToLower(strings.TrimSpace(v))
+	}
+}
+
+func isSupportedDatabaseType(v string) bool {
+	switch v {
+	case "mysql", "postgresql", "redis", "mongodb":
+		return true
+	default:
+		return false
+	}
 }
 
 func canonicalTargetURL(raw string) string {

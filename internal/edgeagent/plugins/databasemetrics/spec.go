@@ -203,44 +203,48 @@ func (s sourceSpec) command(binDir, secretPath, secret string) (binary string, a
 }
 
 func mysqlExporterArgs(exporter exporterSpec) []string {
-	args := make([]string, 0, len(exporter.Collectors)+len(exporter.Bools)+len(exporter.Strings)+len(exporter.Ints))
+	args := make([]string, 0, len(exporter.Collectors)+len(exporter.Bools)+len(exporter.Strings)+len(exporter.Ints)+len(exporter.Lists))
 	for _, collector := range exporter.Collectors {
 		if _, ok := mysqlCollectorFlags[collector]; ok {
 			args = append(args, "--collect."+collector)
 		}
 	}
-	args = appendBoolFlags(args, exporter.Bools, mysqlBoolExporterFlags)
+	args = appendNoableBoolFlags(args, exporter.Bools, mysqlBoolExporterFlags)
 	args = appendStringFlags(args, exporter.Strings, mysqlStringExporterFlags)
 	args = appendIntFlags(args, exporter.Ints, mysqlIntExporterFlags)
+	args = appendRepeatListFlags(args, exporter.Lists, mysqlRepeatListExporterFlags)
 	return args
 }
 
 func postgresExporterArgs(exporter exporterSpec) []string {
-	args := make([]string, 0, len(exporter.Bools)+len(exporter.Strings)+len(exporter.Lists))
-	args = appendBoolFlags(args, exporter.Bools, postgresBoolExporterFlags)
+	args := make([]string, 0, len(exporter.Bools)+len(exporter.Strings)+len(exporter.Ints)+len(exporter.Lists))
+	args = appendNoableBoolFlags(args, exporter.Bools, postgresBoolExporterFlags)
 	args = appendStringFlags(args, exporter.Strings, postgresStringExporterFlags)
+	args = appendIntFlags(args, exporter.Ints, postgresIntExporterFlags)
 	args = appendListFlags(args, exporter.Lists, postgresListExporterFlags)
 	return args
 }
 
 func redisExporterArgs(exporter exporterSpec) []string {
 	args := make([]string, 0, len(exporter.Bools)+len(exporter.Strings)+len(exporter.Ints))
-	args = appendBoolFlags(args, exporter.Bools, redisBoolExporterFlags)
+	args = appendStdBoolFlags(args, exporter.Bools, redisBoolExporterFlags)
 	args = appendStringFlags(args, exporter.Strings, redisStringExporterFlags)
 	args = appendIntFlags(args, exporter.Ints, redisIntExporterFlags)
 	return args
 }
 
 func mongodbExporterArgs(exporter exporterSpec) []string {
-	args := make([]string, 0, len(exporter.Collectors)+len(exporter.Bools)+len(exporter.Strings)+len(exporter.Ints)+1)
+	args := make([]string, 0, len(exporter.Collectors)+len(exporter.Bools)+len(exporter.Strings)+len(exporter.Ints)+len(exporter.Lists)+1)
 	if exporter.Bools["collect_all"] {
 		args = append(args, "--collect-all")
 	} else {
 		args = append(args, mongodbCollectorArgs(exporter)...)
 	}
 	args = appendBoolFlags(args, exporter.Bools, mongoDBBoolExporterFlags)
+	args = appendNoBoolFlags(args, exporter.Bools, mongoDBNoBoolExporterFlags)
 	args = appendStringFlags(args, exporter.Strings, mongoDBStringExporterFlags)
 	args = appendIntFlags(args, exporter.Ints, mongoDBIntExporterFlags)
+	args = appendListFlags(args, exporter.Lists, mongoDBListExporterFlags)
 	return args
 }
 
@@ -262,6 +266,45 @@ func appendBoolFlags(args []string, values map[string]bool, flags map[string]str
 	for _, key := range sortedKeys(flags) {
 		if values[key] {
 			args = append(args, "--"+flags[key])
+		}
+	}
+	return args
+}
+
+func appendNoableBoolFlags(args []string, values map[string]bool, flags map[string]string) []string {
+	for _, key := range sortedKeys(flags) {
+		value, ok := values[key]
+		if !ok {
+			continue
+		}
+		if value {
+			args = append(args, "--"+flags[key])
+		} else {
+			args = append(args, "--no-"+flags[key])
+		}
+	}
+	return args
+}
+
+func appendStdBoolFlags(args []string, values map[string]bool, flags map[string]string) []string {
+	for _, key := range sortedKeys(flags) {
+		value, ok := values[key]
+		if !ok {
+			continue
+		}
+		if value {
+			args = append(args, "--"+flags[key])
+		} else {
+			args = append(args, "--"+flags[key]+"=false")
+		}
+	}
+	return args
+}
+
+func appendNoBoolFlags(args []string, values map[string]bool, flags map[string]string) []string {
+	for _, key := range sortedKeys(flags) {
+		if values[key] {
+			args = append(args, "--no-"+flags[key])
 		}
 	}
 	return args
@@ -297,6 +340,18 @@ func appendListFlags(args []string, values map[string][]string, flags map[string
 	return args
 }
 
+func appendRepeatListFlags(args []string, values map[string][]string, flags map[string]string) []string {
+	for _, key := range sortedKeys(flags) {
+		for _, item := range values[key] {
+			item = strings.TrimSpace(item)
+			if item != "" {
+				args = append(args, "--"+flags[key]+"="+item)
+			}
+		}
+	}
+	return args
+}
+
 func sortedKeys(m map[string]string) []string {
 	keys := make([]string, 0, len(m))
 	for key := range m {
@@ -304,6 +359,16 @@ func sortedKeys(m map[string]string) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+func mergeStringMaps(maps ...map[string]string) map[string]string {
+	out := map[string]string{}
+	for _, items := range maps {
+		for key, value := range items {
+			out[key] = value
+		}
+	}
+	return out
 }
 
 func (s sourceSpec) scrapeTarget() metricscommon.Target {
@@ -453,11 +518,13 @@ func allowedExporterFields(dbType string) exporterFieldMaps {
 			bools:   mysqlBoolExporterFlags,
 			strings: mysqlStringExporterFlags,
 			ints:    mysqlIntExporterFlags,
+			lists:   mysqlRepeatListExporterFlags,
 		}
 	case "postgresql":
 		return exporterFieldMaps{
 			bools:   postgresBoolExporterFlags,
 			strings: postgresStringExporterFlags,
+			ints:    postgresIntExporterFlags,
 			lists:   postgresListExporterFlags,
 		}
 	case "redis":
@@ -467,10 +534,12 @@ func allowedExporterFields(dbType string) exporterFieldMaps {
 			ints:    redisIntExporterFlags,
 		}
 	case "mongodb":
+		bools := mergeStringMaps(mongoDBBoolExporterFlags, mongoDBNoBoolExporterFlags)
 		return exporterFieldMaps{
-			bools:   mongoDBBoolExporterFlags,
+			bools:   bools,
 			strings: mongoDBStringExporterFlags,
 			ints:    mongoDBIntExporterFlags,
+			lists:   mongoDBListExporterFlags,
 		}
 	default:
 		return exporterFieldMaps{}
@@ -528,16 +597,24 @@ var mysqlCollectorFlags = map[string]struct{}{
 }
 
 var mysqlBoolExporterFlags = map[string]string{
-	"heartbeat_utc": "collect.heartbeat.utc",
+	"exporter_enable_lock_wait_timeout":         "exporter.enable_lock_wait_timeout",
+	"exporter_log_slow_filter":                  "exporter.log_slow_filter",
+	"heartbeat_utc":                             "collect.heartbeat.utc",
+	"info_schema_processlist_processes_by_host": "collect.info_schema.processlist.processes_by_host",
+	"info_schema_processlist_processes_by_user": "collect.info_schema.processlist.processes_by_user",
+	"mysql_user_privileges":                     "collect.mysql.user.privileges",
 }
 
 var mysqlStringExporterFlags = map[string]string{
 	"heartbeat_database":                       "collect.heartbeat.database",
 	"heartbeat_table":                          "collect.heartbeat.table",
 	"info_schema_tables_databases":             "collect.info_schema.tables.databases",
+	"log_format":                               "log.format",
+	"log_level":                                "log.level",
+	"perf_schema_file_instances_filter":        "collect.perf_schema.file_instances.filter",
 	"perf_schema_file_instances_remove_prefix": "collect.perf_schema.file_instances.remove_prefix",
 	"perf_schema_memory_events_remove_prefix":  "collect.perf_schema.memory_events.remove_prefix",
-	"exporter_log_slow_filter":                 "exporter.log_slow_filter",
+	"timeout_offset":                           "timeout-offset",
 }
 
 var mysqlIntExporterFlags = map[string]string{
@@ -548,21 +625,59 @@ var mysqlIntExporterFlags = map[string]string{
 	"exporter_lock_wait_timeout":                     "exporter.lock_wait_timeout",
 }
 
+var mysqlRepeatListExporterFlags = map[string]string{
+	"perf_schema_eventsstatements_exclude_schemas": "collect.perf_schema.eventsstatements.exclude_schemas",
+}
+
 var postgresBoolExporterFlags = map[string]string{
-	"auto_discover_databases":  "auto-discover-databases",
-	"disable_default_metrics":  "disable-default-metrics",
-	"disable_settings_metrics": "disable-settings-metrics",
-	"dumpmaps":                 "dumpmaps",
+	"auto_discover_databases":                 "auto-discover-databases",
+	"collector_buffercache_summary":           "collector.buffercache_summary",
+	"collector_database":                      "collector.database",
+	"collector_database_wraparound":           "collector.database_wraparound",
+	"collector_locks":                         "collector.locks",
+	"collector_long_running_transactions":     "collector.long_running_transactions",
+	"collector_postmaster":                    "collector.postmaster",
+	"collector_process_idle":                  "collector.process_idle",
+	"collector_replication":                   "collector.replication",
+	"collector_replication_slot":              "collector.replication_slot",
+	"collector_roles":                         "collector.roles",
+	"collector_stat_activity_autovacuum":      "collector.stat_activity_autovacuum",
+	"collector_stat_bgwriter":                 "collector.stat_bgwriter",
+	"collector_stat_checkpointer":             "collector.stat_checkpointer",
+	"collector_stat_database":                 "collector.stat_database",
+	"collector_stat_progress_vacuum":          "collector.stat_progress_vacuum",
+	"collector_stat_statements":               "collector.stat_statements",
+	"collector_stat_statements_include_query": "collector.stat_statements.include_query",
+	"collector_stat_user_tables":              "collector.stat_user_tables",
+	"collector_stat_wal_receiver":             "collector.stat_wal_receiver",
+	"collector_statio_user_indexes":           "collector.statio_user_indexes",
+	"collector_statio_user_tables":            "collector.statio_user_tables",
+	"collector_wal":                           "collector.wal",
+	"collector_xlog_location":                 "collector.xlog_location",
+	"disable_default_metrics":                 "disable-default-metrics",
+	"disable_settings_metrics":                "disable-settings-metrics",
+	"dumpmaps":                                "dumpmaps",
 }
 
 var postgresStringExporterFlags = map[string]string{
-	"extend_query_path": "extend.query-path",
-	"metric_prefix":     "metric-prefix",
+	"collection_timeout": "collection-timeout",
+	"config_file":        "config.file",
+	"extend_query_path":  "extend.query-path",
+	"log_format":         "log.format",
+	"log_level":          "log.level",
+	"metric_prefix":      "metric-prefix",
+}
+
+var postgresIntExporterFlags = map[string]string{
+	"stat_statements_limit":        "collector.stat_statements.limit",
+	"stat_statements_query_length": "collector.stat_statements.query_length",
 }
 
 var postgresListExporterFlags = map[string]string{
-	"include_databases": "include-databases",
-	"exclude_databases": "exclude-databases",
+	"exclude_databases":                 "exclude-databases",
+	"include_databases":                 "include-databases",
+	"stat_statements_exclude_databases": "collector.stat_statements.exclude_databases",
+	"stat_statements_exclude_users":     "collector.stat_statements.exclude_users",
 }
 
 var redisBoolExporterFlags = map[string]string{
@@ -581,9 +696,11 @@ var redisBoolExporterFlags = map[string]string{
 	"include_sentinel_peer_info":          "include-sentinel-peer-info",
 	"include_system_metrics":              "include-system-metrics",
 	"is_cluster":                          "is-cluster",
+	"is_tile38":                           "is-tile38",
 	"lua_script_read_only":                "lua-script-read-only",
 	"ping_on_connect":                     "ping-on-connect",
 	"redis_only_metrics":                  "redis-only-metrics",
+	"set_client_name":                     "set-client-name",
 	"skip_checkkeys_for_role_master":      "skip-checkkeys-for-role-master",
 	"streams_exclude_consumer_metrics":    "streams-exclude-consumer-metrics",
 }
@@ -600,6 +717,7 @@ var redisStringExporterFlags = map[string]string{
 	"count_keys":           "count-keys",
 	"log_format":           "log-format",
 	"log_level":            "log-level",
+	"namespace":            "namespace",
 	"script":               "script",
 }
 
@@ -612,8 +730,14 @@ var mongoDBBoolExporterFlags = map[string]string{
 	"collstats_enable_details":          "collector.collstats-enable-details",
 	"compatible_mode":                   "compatible-mode",
 	"discovering_mode":                  "discovering-mode",
+	"mongodb_global_conn_pool":          "mongodb.global-conn-pool",
 	"metrics_override_descending_index": "metrics.overridedescendingindex",
 	"split_cluster":                     "split-cluster",
+}
+
+var mongoDBNoBoolExporterFlags = map[string]string{
+	"disable_direct_connect":   "mongodb.direct-connect",
+	"disable_exporter_metrics": "collector.exporter-metrics",
 }
 
 var mongoDBStringExporterFlags = map[string]string{
@@ -622,8 +746,15 @@ var mongoDBStringExporterFlags = map[string]string{
 }
 
 var mongoDBIntExporterFlags = map[string]string{
-	"collstats_limit": "collector.collstats-limit",
-	"profile_time_ts": "collector.profile-time-ts",
+	"collstats_limit":            "collector.collstats-limit",
+	"mongodb_connect_timeout_ms": "mongodb.connect-timeout-ms",
+	"profile_time_ts":            "collector.profile-time-ts",
+	"web_timeout_offset":         "web.timeout-offset",
+}
+
+var mongoDBListExporterFlags = map[string]string{
+	"mongodb_collstats_colls":  "mongodb.collstats-colls",
+	"mongodb_indexstats_colls": "mongodb.indexstats-colls",
 }
 
 var mongoDBCollectorFlags = map[string]struct{}{

@@ -124,7 +124,7 @@ migrate-down: ## DB migrate down 1 步
 docker: docker-ongrid docker-ongrid-edge ## 构建全部镜像
 
 docker-ongrid: ## 构建 ongrid 镜像
-	docker build -t ongrid:$(VERSION) -f deploy/Dockerfile.ongrid .
+	docker build --build-arg VERSION=$(VERSION) -t ongrid:$(VERSION) -f deploy/Dockerfile.ongrid .
 
 docker-ongrid-edge: ## 构建 ongrid-edge 镜像
 	docker build -t ongrid-edge:$(VERSION) -f deploy/Dockerfile.ongrid-edge .
