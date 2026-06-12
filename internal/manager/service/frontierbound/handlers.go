@@ -252,6 +252,19 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 		if len(in.Plugins) > 0 {
 			items := make([]edgebiz.PluginHealth, 0, len(in.Plugins))
 			for _, p := range in.Plugins {
+				targets := make([]edgebiz.PluginTargetHealth, 0, len(p.Targets))
+				for _, t := range p.Targets {
+					targets = append(targets, edgebiz.PluginTargetHealth{
+						ID:            t.ID,
+						Name:          t.Name,
+						Kind:          t.Kind,
+						State:         t.State,
+						LastError:     t.LastError,
+						Samples:       t.Samples,
+						LastSuccessAt: unixOrZero(t.LastSuccessAt),
+						UpdatedAt:     unixOrZero(t.UpdatedAt),
+					})
+				}
 				items = append(items, edgebiz.PluginHealth{
 					Name:         p.Name,
 					State:        p.State,
@@ -260,6 +273,7 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 					PID:          p.PID,
 					StartedAt:    unixOrZero(p.StartedAt),
 					UpdatedAt:    unixOrZero(p.UpdatedAt),
+					Targets:      targets,
 				})
 			}
 			w.EdgeUC.RecordPluginHealth(canonicalEdgeID, items)
@@ -490,4 +504,3 @@ func unixOrZero(sec int64) time.Time {
 	}
 	return time.Unix(sec, 0).UTC()
 }
-
