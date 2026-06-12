@@ -113,16 +113,47 @@ func TestAnalyzeDatabaseStatus_NotRegisteredWhenPromNil(t *testing.T) {
 	}
 }
 
-func TestAnalyzeDatabaseStatus_WhenAskedInventory_NotAdvertised(t *testing.T) {
+func TestAnalyzeDatabaseStatus_WhenAskedInventory_AdvertisesCoverage(t *testing.T) {
 	tool := NewAnalyzeDatabaseStatusTool(&fakeDatabaseProm{}, nil, nil, nil, slog.Default())
 	info, err := tool.Info(context.Background())
 	if err != nil {
 		t.Fatalf("Info() error = %v", err)
 	}
 	text := strings.ToLower(info.Description + " " + info.WhenToUse)
-	for _, want := range []string{"not for database inventory", "source counts", "relationship/topology", "do not use for simple inventory/topology"} {
+	for _, want := range []string{
+		"first tool",
+		"exporter metrics can cover",
+		"advanced/optional exporter collectors",
+		"typed object-inventory",
+		"logical database/schema/table/collection/key counts",
+		"object inventory metrics",
+	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("tool routing hints missing %q in %q", want, text)
+		}
+	}
+	for _, old := range []string{"database/source counts", "not for database inventory", "do not use for simple inventory/topology"} {
+		if strings.Contains(text, old) {
+			t.Fatalf("tool routing hints still contain old exclusion %q in %q", old, text)
+		}
+	}
+}
+
+func TestListDatabaseSources_WhenAskedGenericInventory_AdvertisesRoute(t *testing.T) {
+	tool := NewListDatabaseSourcesTool(nil, nil, nil, slog.Default())
+	info, err := tool.Info(context.Background())
+	if err != nil {
+		t.Fatalf("Info() error = %v", err)
+	}
+	text := strings.ToLower(info.Description + " " + info.WhenToUse)
+	for _, want := range []string{
+		"how many databases do i have",
+		"without naming a db type",
+		"which device or edge hosts them",
+		"databasemetrics or custommetrics",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("list datasource routing hints missing %q in %q", want, text)
 		}
 	}
 }
@@ -298,6 +329,68 @@ func TestAnalyzeDatabaseStatus_MySQLConnectionPressure(t *testing.T) {
 	}
 }
 
+func TestAnalyzeDatabaseStatus_PostgreSQLObjectInventory(t *testing.T) {
+	deviceID := uint64(42)
+	uc := edgebiz.NewUsecase(newFakeEdgeRepo(&edgemodel.Edge{ID: 1, Name: "pg-node", DeviceID: &deviceID}), nil, nil, slog.Default())
+	selector := `device_id="42",ongrid_source="db:pg-managed"`
+	prom := &fakeDatabaseProm{results: map[string]*promquery.InstantResult{
+		`sum(count by (__name__) ({` + selector + `}))`: promVector(promTestValue{value: "554"}),
+		`count by (__name__) ({` + selector + `})`: promVector(
+			promTestValue{metric: map[string]string{"__name__": "pg_up"}, value: "1"},
+			promTestValue{metric: map[string]string{"__name__": "pg_database_size_bytes"}, value: "1"},
+			promTestValue{metric: map[string]string{"__name__": "pg_stat_user_tables_n_live_tup"}, value: "1"},
+		),
+		`min(pg_up{` + selector + `})`:                                                             promVector(promTestValue{value: "1"}),
+		`sum(pg_database_size_bytes{` + selector + `})`:                                            promVector(promTestValue{value: "3072"}),
+		`count(count by (datname) (pg_database_size_bytes{` + selector + `}))`:                     promVector(promTestValue{value: "2"}),
+		`count(count by (schemaname, relname) (pg_stat_user_tables_n_live_tup{` + selector + `}))`: promVector(promTestValue{value: "17"}),
+	}}
+	reg := NewRegistry(&fakeCaller{}, uc, nil, prom, nil, nil, nil, slog.Default())
+	reg.SetPluginConfigLister(fakePluginConfigLister{rows: map[uint64][]edgebiz.PluginRow{
+		1: {
+			{
+				PluginName: "databasemetrics",
+				Enabled:    true,
+				Spec: map[string]interface{}{
+					"sources": []interface{}{
+						map[string]interface{}{"id": "pg-managed", "db_type": "postgresql", "enabled": true},
+					},
+				},
+			},
+		},
+	}})
+
+	out, err := reg.Invoke(context.Background(), ToolNameAnalyzeDatabaseStatus, json.RawMessage(`{"db_types":["postgresql"]}`))
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+	var resp DatabaseStatusResponse
+	if err := json.Unmarshal(out.ResultJSON, &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Count != 1 || resp.ByDBType["postgresql"] != 1 || resp.ByPlugin["databasemetrics"] != 1 {
+		t.Fatalf("wrong source summary: %+v", resp)
+	}
+	if len(resp.Sources) != 1 {
+		t.Fatalf("sources=%d want 1: %s", len(resp.Sources), string(out.ResultJSON))
+	}
+	src := resp.Sources[0]
+	if src.Metrics["database_count"] != 2 || src.Metrics["table_count"] != 17 {
+		t.Fatalf("object inventory metrics wrong: %+v", src.Metrics)
+	}
+	if src.Metrics["database_size_bytes"] != 3072 {
+		t.Fatalf("database_size_bytes=%v want 3072", src.Metrics["database_size_bytes"])
+	}
+	if got := capabilityStatus(src.Capabilities, "object_inventory"); got != "available" {
+		t.Fatalf("object_inventory capability=%q want available: %+v", got, src.Capabilities)
+	}
+	for _, finding := range src.Findings {
+		if finding.Code == "database_object_inventory_missing" {
+			t.Fatalf("object inventory should be available, got missing finding: %+v", src.Findings)
+		}
+	}
+}
+
 func TestAnalyzeDatabaseStatus_MongoDBLimitedMetricsCapability(t *testing.T) {
 	deviceID := uint64(42)
 	uc := edgebiz.NewUsecase(newFakeEdgeRepo(&edgemodel.Edge{ID: 1, Name: "node", DeviceID: &deviceID}), nil, nil, slog.Default())
@@ -349,14 +442,24 @@ func TestAnalyzeDatabaseStatus_MongoDBLimitedMetricsCapability(t *testing.T) {
 	if dbstatsCap.Status != "unavailable" || !containsString(dbstatsCap.MissingMetrics, "mongodb_dbstats_dataSize") {
 		t.Fatalf("dbstats capability should explain missing metrics: %+v", dbstatsCap)
 	}
+	if got := capabilityStatus(src.Capabilities, "object_inventory"); got != "unavailable" {
+		t.Fatalf("object_inventory capability=%q want unavailable: %+v", got, src.Capabilities)
+	}
 	found := false
+	foundObjectInventoryMissing := false
 	for _, finding := range src.Findings {
 		if finding.Code == "mongodb_limited_metrics" && finding.Severity == "info" {
 			found = true
 		}
+		if finding.Code == "database_object_inventory_missing" && finding.Severity == "info" {
+			foundObjectInventoryMissing = true
+		}
 	}
 	if !found {
 		t.Fatalf("missing mongodb_limited_metrics finding: %+v", src.Findings)
+	}
+	if !foundObjectInventoryMissing {
+		t.Fatalf("missing database_object_inventory_missing finding: %+v", src.Findings)
 	}
 }
 
@@ -395,6 +498,7 @@ func TestAnalyzeDatabaseStatus_MongoDBServerStatusMetrics(t *testing.T) {
 			promTestValue{metric: map[string]string{"__name__": "mongodb_currentop_fsync_lock_state"}, value: "1"},
 			promTestValue{metric: map[string]string{"__name__": "mongodb_profile_slow_query_count"}, value: "1"},
 			promTestValue{metric: map[string]string{"__name__": "mongodb_pbm_cluster_backup_configured"}, value: "1"},
+			promTestValue{metric: map[string]string{"__name__": "mongodb_future_new_metric"}, value: "1"},
 		),
 		`min(mongodb_up{` + selector + `})`:                                                                                                                       promVector(promTestValue{value: "1"}),
 		`max(mongodb_ss_connections{` + selector + `,conn_type="current"})`:                                                                                       promVector(promTestValue{value: "12"}),
@@ -417,6 +521,7 @@ func TestAnalyzeDatabaseStatus_MongoDBServerStatusMetrics(t *testing.T) {
 		`sum(increase(mongodb_ss_metrics_query_sort_spillToDisk{` + selector + `}[15m]))`:                                                                         promVector(promTestValue{value: "0"}),
 		`sum(increase(mongodb_ss_metrics_cursor_timedOut{` + selector + `}[15m]))`:                                                                                promVector(promTestValue{value: "0"}),
 		`max(mongodb_ss_transactions_currentOpen{` + selector + `})`:                                                                                              promVector(promTestValue{value: "1"}),
+		`count(count by (database) (mongodb_dbstats_dataSize{` + selector + `}))`:                                                                                 promVector(promTestValue{value: "3"}),
 		`sum(mongodb_dbstats_dataSize{` + selector + `})`:                                                                                                         promVector(promTestValue{value: "4096"}),
 		`sum(mongodb_dbstats_freeStorageSize{` + selector + `})`:                                                                                                  promVector(promTestValue{value: "512"}),
 		`sum(rate(mongodb_top_total_count{` + selector + `}[5m]))`:                                                                                                promVector(promTestValue{value: "2"}),
@@ -454,6 +559,12 @@ func TestAnalyzeDatabaseStatus_MongoDBServerStatusMetrics(t *testing.T) {
 		t.Fatalf("sources=%d want 1: %s", len(resp.Sources), string(out.ResultJSON))
 	}
 	src := resp.Sources[0]
+	if src.MetricCount == 0 || !containsString(src.MetricNames, "mongodb_ss_connections") {
+		t.Fatalf("source should expose discovered metric names and count: %+v", src)
+	}
+	if !containsString(src.UnmappedNames, "mongodb_future_new_metric") {
+		t.Fatalf("unmapped exporter metric not surfaced: %+v", src.UnmappedNames)
+	}
 	for _, name := range []string{
 		"liveness", "feature_compatibility", "connections", "connection_rate_limits", "operations",
 		"errors_asserts", "memory", "page_faults", "network", "global_locks", "flow_control",
@@ -465,6 +576,10 @@ func TestAnalyzeDatabaseStatus_MongoDBServerStatusMetrics(t *testing.T) {
 			t.Fatalf("%s capability=%q want available: %+v", name, got, src.Capabilities)
 		}
 	}
+	wtCap := capabilityByName(src.Capabilities, "wiredtiger_cache")
+	if wtCap.MetricCount < 4 || !containsString(wtCap.Metrics, "mongodb_ss_wt_cache_bytes_currently_in_the_cache") {
+		t.Fatalf("wiredtiger_cache should expose actual matched metrics: %+v", wtCap)
+	}
 	if src.Metrics["connections_current"] != 12 || src.Metrics["connections_available"] != 838848 {
 		t.Fatalf("connection metrics wrong: %+v", src.Metrics)
 	}
@@ -474,7 +589,7 @@ func TestAnalyzeDatabaseStatus_MongoDBServerStatusMetrics(t *testing.T) {
 	if _, ok := src.Metrics["page_faults_15m"]; !ok {
 		t.Fatalf("missing page_faults_15m metric: %+v", src.Metrics)
 	}
-	if src.Metrics["wiredtiger_cache_usage_pct"] != 25 || src.Metrics["network_input_bytes_per_second"] != 128 || src.Metrics["dbstats_data_size_bytes"] != 4096 {
+	if src.Metrics["wiredtiger_cache_usage_pct"] != 25 || src.Metrics["network_input_bytes_per_second"] != 128 || src.Metrics["dbstats_data_size_bytes"] != 4096 || src.Metrics["database_count"] != 3 {
 		t.Fatalf("expanded mongodb metrics wrong: %+v", src.Metrics)
 	}
 }
@@ -544,7 +659,7 @@ func TestDatabaseCapabilitySpecsCoverExporterCollectorFamilies(t *testing.T) {
 			"info_schema_processlist", "info_schema_clientstats", "info_schema_userstats",
 			"info_schema_tablestats", "info_schema_schemastats", "info_schema_innodb_metrics",
 			"info_schema_innodb_tablespaces", "info_schema_query_response_time",
-			"info_schema_replica_host", "rocksdb_perf_context", "perf_schema_events_statements",
+			"info_schema_replica_host", "rocksdb_perf_context", "object_inventory", "perf_schema_events_statements",
 			"perf_schema_events_statements_sum", "perf_schema_events_waits", "perf_schema_file_events",
 			"perf_schema_file_instances", "perf_schema_index_io_waits", "perf_schema_memory_events",
 			"perf_schema_table_io_waits", "perf_schema_table_locks", "perf_schema_replication_group",
@@ -554,19 +669,19 @@ func TestDatabaseCapabilitySpecsCoverExporterCollectorFamilies(t *testing.T) {
 			"database_collector", "stat_database_collector", "settings", "roles",
 			"database_wraparound", "long_running_transactions", "postmaster", "process_idle",
 			"replication_slot", "stat_activity_autovacuum", "stat_checkpointer",
-			"stat_progress_vacuum", "stat_statements", "stat_user_tables", "stat_wal_receiver",
+			"stat_progress_vacuum", "stat_statements", "stat_user_tables", "object_inventory", "stat_wal_receiver",
 			"statio_user_indexes", "statio_user_tables", "wal_directory", "xlog_location",
 			"buffercache_summary",
 		},
 		"redis": {
-			"instance_info", "client_list", "command_stats", "key_value_metrics", "key_groups",
+			"instance_info", "client_list", "command_stats", "object_inventory", "key_value_metrics", "key_groups",
 			"rdb_file_size", "latency_latest", "latency_histogram", "cluster_nodes", "streams",
 			"lua_scripts", "module_info", "search_indexes", "config_metrics", "system_metrics",
 			"sentinel", "tile38",
 		},
 		"mongodb": {
 			"general_info", "diagnosticdata", "server_status", "replset_status", "replset_config",
-			"oplog_stats", "dbstats", "dbstats_free_storage", "topmetrics", "current_ops",
+			"oplog_stats", "object_inventory", "dbstats", "dbstats_free_storage", "topmetrics", "current_ops",
 			"indexstats", "collstats", "profile", "sharding", "backup_pbm", "collect_all",
 			"compatible_mode",
 		},

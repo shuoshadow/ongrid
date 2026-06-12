@@ -178,6 +178,12 @@ type WriteDatabaseMetricsSecretRequest struct {
 	PreservePassword bool                   `json:"preserve_password,omitempty"`
 }
 
+// WriteDatabaseMetricsSecretsRequest batches edge-local credential writes so
+// the edge can stage every secret before replacing any existing file.
+type WriteDatabaseMetricsSecretsRequest struct {
+	Secrets []WriteDatabaseMetricsSecretRequest `json:"secrets"`
+}
+
 // WriteDatabaseMetricsSecretResponse acknowledges that the edge wrote the
 // requested credential file.
 type WriteDatabaseMetricsSecretResponse struct {

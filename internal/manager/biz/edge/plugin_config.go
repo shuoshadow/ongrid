@@ -32,7 +32,7 @@ type EdgeReloadNotifier interface {
 // on an edge. Implemented by the frontierbound client. The manager calls this
 // during a UI save and then persists only the non-secret plugin spec.
 type DatabaseMetricsSecretWriter interface {
-	WriteDatabaseMetricsSecret(ctx context.Context, edgeID uint64, req tunnel.WriteDatabaseMetricsSecretRequest) error
+	WriteDatabaseMetricsSecrets(ctx context.Context, edgeID uint64, reqs []tunnel.WriteDatabaseMetricsSecretRequest) error
 }
 
 // EndpointResolver returns the data plane endpoint a given plugin

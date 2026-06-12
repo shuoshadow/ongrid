@@ -21,23 +21,31 @@ const ToolNameAnalyzeDatabaseStatus = "analyze_database_status"
 const ToolNameListDatabaseSources = "list_database_sources"
 
 const AnalyzeDatabaseStatusDescription = "Analyze database health and performance from ongrid database metrics sources. " +
-	"Use this before raw query_promql only when the user asks whether MySQL, PostgreSQL, Redis, or MongoDB is healthy, degraded, slow, overloaded, or lacks specific metric coverage. " +
-	"It is not for database inventory, source counts, configured-source lists, or relationship/topology questions. " +
-	"The response includes a capability matrix; unavailable capabilities mean the exporter has not collected the needed metrics."
+	"Use this as the first tool for any MySQL, PostgreSQL, Redis, or MongoDB question that exporter metrics can cover, before raw query_promql, query_knowledge, or AgentTool. " +
+	"This includes health, performance, logical database/schema/table/collection/key counts from metrics, cluster/replication, advanced/optional exporter collectors, and metric coverage. " +
+	"It can answer typed object-inventory questions such as how many MySQL schemas, PostgreSQL databases/tables, Redis logical DBs/keys, or MongoDB databases/collections exist from collected exporter metrics; if object inventory metrics are not collected, the response says which capability is missing. " +
+	"The response includes discovered metric names, unmapped metric names, and a capability matrix; unavailable capabilities mean the exporter has not collected the needed metrics."
 
 const analyzeDatabaseStatusWhenToUse = "When the user asks about database health, connection pressure, slow queries, Redis memory, " +
 	"PostgreSQL deadlocks/cache hit, MongoDB exporter status, DB throughput, lock waits, temp files, replication, persistence, " +
-	"network IO, storage size, TLS/SSL, exporter collector coverage, or which database metrics are available from the current exporter. " +
-	"Do NOT use for simple inventory/topology questions such as how many databases exist, which database sources are configured, or what relationship they have; use topology/device/config context instead. " +
+	"network IO, storage size, TLS/SSL, exporter collector coverage, logical database/schema/table/collection/key counts, cluster status, or which database metrics are available from the current exporter. " +
+	"For database questions, prefer this tool whenever MySQL/PostgreSQL/Redis/MongoDB exporters could provide the answer, including advanced and optional collectors. " +
+	"If the user asks a database object question and the exporter has not collected that metric family, use this tool and report the missing capability instead of falling through to raw PromQL. " +
 	"NOT for arbitrary metric exploration after the high-level status is already known; use query_promql for deep custom PromQL."
 
+const (
+	maxDatabaseSourceMetricNames     = 128
+	maxDatabaseCapabilityMetricNames = 64
+	maxDatabaseUnmappedMetricNames   = 64
+)
+
 const ListDatabaseSourcesDescription = "List configured database metrics sources without querying Prometheus. " +
-	"Use this for database inventory, source counts, configured-source lists, and simple device/edge/plugin/source relationships. " +
+	"Use this only for configured-source lists, source counts, generic database inventory questions like 'how many databases do I have', where a database source is located, and simple device/edge/plugin/source relationships when the user asks about configuration rather than current database state or collected database objects. " +
 	"Not for health, performance, or metric coverage analysis; use analyze_database_status for those."
 
-const listDatabaseSourcesWhenToUse = "When the user asks how many databases exist, which MySQL/PostgreSQL/Redis/MongoDB sources are configured, " +
-	"which device or edge hosts them, whether they come from databasemetrics or custommetrics, or what simple relationship the configured sources have. " +
-	"Do NOT use for current health, connection pressure, slow queries, cache/memory, replication, TLS/SSL status, or exporter metric coverage."
+const listDatabaseSourcesWhenToUse = "When the user explicitly asks which MySQL/PostgreSQL/Redis/MongoDB metric sources are configured, " +
+	"how many databases they have without naming a DB type or an object metric, how many database metric sources are configured, which device or edge hosts them, whether they come from databasemetrics or custommetrics, or what simple relationship the configured sources have. " +
+	"Do NOT use for current health, database/table/collection/key counts from metrics, connection pressure, slow queries, cache/memory, replication, TLS/SSL status, or exporter metric coverage."
 
 var AnalyzeDatabaseStatusSchema = json.RawMessage(`{
   "type": "object",
@@ -152,7 +160,10 @@ type DatabaseStatusResponse struct {
 	Status          string                 `json:"status"`
 	GeneratedAt     time.Time              `json:"generated_at"`
 	LookbackSeconds int                    `json:"lookback_seconds"`
+	Count           int                    `json:"count"`
 	Truncated       bool                   `json:"truncated,omitempty"`
+	ByDBType        map[string]int         `json:"by_db_type,omitempty"`
+	ByPlugin        map[string]int         `json:"by_plugin,omitempty"`
 	Sources         []DatabaseStatusSource `json:"sources"`
 	Errors          []string               `json:"errors,omitempty"`
 }
@@ -173,6 +184,9 @@ type DatabaseStatusSource struct {
 	LastError     string                  `json:"last_error,omitempty"`
 	Status        string                  `json:"status"`
 	Capabilities  []DatabaseCapability    `json:"capabilities,omitempty"`
+	MetricCount   int                     `json:"metric_count,omitempty"`
+	MetricNames   []string                `json:"metric_names,omitempty"`
+	UnmappedNames []string                `json:"unmapped_metric_names,omitempty"`
 	Metrics       map[string]float64      `json:"metrics,omitempty"`
 	Findings      []DatabaseStatusFinding `json:"findings,omitempty"`
 }
@@ -180,6 +194,7 @@ type DatabaseStatusSource struct {
 type DatabaseCapability struct {
 	Name           string   `json:"name"`
 	Status         string   `json:"status"`
+	MetricCount    int      `json:"metric_count,omitempty"`
 	Metrics        []string `json:"metrics,omitempty"`
 	MissingMetrics []string `json:"missing_metrics,omitempty"`
 	Message        string   `json:"message,omitempty"`
@@ -460,6 +475,8 @@ func (r databaseStatusRunner) run(ctx context.Context, argsJSON []byte) (json.Ra
 		Status:          "unknown",
 		GeneratedAt:     time.Now().UTC(),
 		LookbackSeconds: in.LookbackSeconds,
+		ByDBType:        map[string]int{},
+		ByPlugin:        map[string]int{},
 		Sources:         []DatabaseStatusSource{},
 	}
 
@@ -471,6 +488,11 @@ func (r databaseStatusRunner) run(ctx context.Context, argsJSON []byte) (json.Ra
 	sourceIDs := stringSet(in.SourceIDs)
 	sources, errs := r.discoverSources(callCtx, candidates, dbTypes, sourceIDs, includeCustom, in.IncludeDisabled)
 	resp.Errors = append(resp.Errors, errs...)
+	resp.Count = len(sources)
+	for _, src := range sources {
+		resp.ByDBType[src.DBType]++
+		resp.ByPlugin[src.Plugin]++
+	}
 	if len(sources) > 32 {
 		sources = sources[:32]
 		resp.Truncated = true
@@ -788,7 +810,12 @@ func (r databaseStatusRunner) analyzeSource(ctx context.Context, src databaseMet
 			Message:  discoveryErr.Error(),
 		})
 	}
+	metricNames := sortedMetricNames(discovered)
+	row.MetricCount = len(metricNames)
+	row.MetricNames = limitStrings(metricNames, maxDatabaseSourceMetricNames)
 	row.Capabilities = databaseCapabilities(src.DBType, discovered)
+	row.UnmappedNames = limitStrings(unmappedDatabaseMetricNames(src.DBType, discovered), maxDatabaseUnmappedMetricNames)
+	r.analyzeDatabaseObjectInventory(ctx, src.DBType, selector, discovered, &row)
 	switch src.DBType {
 	case "mysql":
 		r.analyzeMySQL(ctx, selector, discovered, &row)
@@ -929,6 +956,7 @@ func databaseCapabilitySpecs(dbType string) []databaseCapabilitySpec {
 			{Name: "info_schema_query_response_time", Prefixes: []string{"mysql_info_schema_query_response_time_"}, Message: "Optional query response time histogram collector."},
 			{Name: "info_schema_replica_host", Prefixes: []string{"mysql_info_schema_replica_host_"}, Message: "Optional replica host CPU/lag/latency/log stream metrics."},
 			{Name: "rocksdb_perf_context", Prefixes: []string{"mysql_info_schema_rocksdb_perf_context_"}, Message: "Optional RocksDB performance context metrics."},
+			{Name: "object_inventory", Any: []string{"mysql_info_schema_table_size_data_length", "mysql_info_schema_table_size_index_length"}, Prefixes: []string{"mysql_info_schema_table_size_", "mysql_info_schema_schema_statistics_"}, Message: "Schema and table counts/sizes from optional information_schema collectors. Missing means schema/table counts cannot be answered from metrics."},
 			{Name: "schema_table_inventory", Any: []string{"mysql_info_schema_table_size_data_length", "mysql_info_schema_table_size_index_length"}, Prefixes: []string{"mysql_info_schema_table_size_"}, Message: "Optional high-cardinality schema/table inventory; not enabled in the default local exporter."},
 			{Name: "perf_schema_events_statements", Prefixes: []string{"mysql_perf_schema_events_statements_"}, Message: "Optional performance_schema statement counters, latency, errors, rows, temp tables, and no-index usage."},
 			{Name: "perf_schema_events_statements_sum", Prefixes: []string{"mysql_perf_schema_events_statements_sum_"}, Message: "Optional performance_schema statement summary metrics."},
@@ -961,6 +989,7 @@ func databaseCapabilitySpecs(dbType string) []databaseCapabilitySpec {
 			{Name: "deadlocks_conflicts", Any: []string{"pg_stat_database_deadlocks", "pg_stat_database_conflicts"}, Message: "Deadlocks and recovery/query conflicts."},
 			{Name: "locks", All: []string{"pg_locks_count"}, Message: "Lock counts by mode/type."},
 			{Name: "temp_storage", Any: []string{"pg_stat_database_temp_bytes", "pg_stat_database_temp_files"}, Message: "Temporary file/byte growth."},
+			{Name: "object_inventory", Any: []string{"pg_database_size_bytes", "pg_stat_user_tables_n_live_tup", "pg_stat_user_tables_n_dead_tup"}, Prefixes: []string{"pg_stat_user_tables_"}, Message: "Database and user-table counts from pg_database and pg_stat_user_tables collectors. Missing means database/table counts cannot be answered from metrics."},
 			{Name: "database_size", All: []string{"pg_database_size_bytes"}, Message: "Database size by database label."},
 			{Name: "bgwriter_checkpoints", Any: []string{"pg_stat_bgwriter_checkpoints_timed_total", "pg_stat_bgwriter_checkpoints_req_total", "pg_stat_bgwriter_buffers_checkpoint_total", "pg_stat_bgwriter_buffers_backend_fsync_total"}, Message: "Checkpoint frequency, checkpoint buffers, and backend fsync pressure."},
 			{Name: "archiver", Any: []string{"pg_stat_archiver_archived_count", "pg_stat_archiver_failed_count"}, Message: "WAL archiver success and failure counters."},
@@ -1002,6 +1031,7 @@ func databaseCapabilitySpecs(dbType string) []databaseCapabilitySpec {
 			{Name: "command_errors", Any: []string{"redis_commands_failed_calls_total", "redis_commands_rejected_calls_total", "redis_total_error_replies", "redis_unexpected_error_replies"}, Message: "Command failures, rejections, and error replies."},
 			{Name: "network_io", Any: []string{"redis_net_input_bytes_total", "redis_net_output_bytes_total", "redis_total_reads_processed", "redis_total_writes_processed"}, Message: "Network bytes and read/write event counters."},
 			{Name: "cache_hit", Any: []string{"redis_keyspace_hits_total", "redis_keyspace_misses_total"}, Message: "Keyspace hit/miss rates and hit ratio."},
+			{Name: "object_inventory", Any: []string{"redis_db_keys", "redis_db_keys_expiring", "redis_keys_count"}, Message: "Logical DB count and key counts from INFO keyspace or optional key counting collectors. Missing means DB/key counts cannot be answered from metrics."},
 			{Name: "keyspace", Any: []string{"redis_db_keys", "redis_db_keys_expiring"}, Message: "Key counts and expiring key counts by DB label."},
 			{Name: "key_value_metrics", Any: []string{"redis_key_size", "redis_key_memory_usage_bytes", "redis_key_value", "redis_key_value_as_string", "redis_keys_count"}, Prefixes: []string{"redis_key_", "redis_keys_"}, Message: "Optional check-keys/check-single-keys/count-keys metrics for key size, value, memory usage, and key counts."},
 			{Name: "key_groups", Any: []string{"redis_number_of_distinct_key_groups", "redis_last_key_groups_scrape_duration_milliseconds"}, Prefixes: []string{"redis_key_group_"}, Message: "Optional key group memory/size metrics from check-key-groups."},
@@ -1069,6 +1099,7 @@ func databaseCapabilitySpecs(dbType string) []databaseCapabilitySpec {
 			{Name: "system_cpu", Any: []string{"mongodb_sys_cpu_user_ms", "mongodb_sys_cpu_system_ms", "mongodb_sys_cpu_iowait_ms", "mongodb_sys_cpu_num_logical_cores"}, Prefixes: []string{"mongodb_sys_cpu_"}, Message: "Host CPU metrics emitted by MongoDB diagnosticData."},
 			{Name: "system_memory", Any: []string{"mongodb_sys_memory_MemTotal_kb", "mongodb_sys_memory_MemAvailable_kb", "mongodb_sys_memory_Dirty_kb"}, Prefixes: []string{"mongodb_sys_memory_"}, Message: "Host memory metrics emitted by MongoDB diagnosticData."},
 			{Name: "system_disk", Any: []string{"mongodb_sys_mounts_capacity", "mongodb_sys_mounts_available", "mongodb_sys_disks_vda_io_time_ms", "mongodb_sys_disks_vda_read_sectors", "mongodb_sys_disks_vda_write_sectors"}, Prefixes: []string{"mongodb_sys_mounts_", "mongodb_sys_disks_"}, Message: "Host disk/mount metrics emitted by MongoDB diagnosticData."},
+			{Name: "object_inventory", Any: []string{"mongodb_dbstats_dataSize", "mongodb_dbstats_objects", "mongodb_collstats_storageStats_count"}, Prefixes: []string{"mongodb_dbstats_", "mongodb_collstats_", "mongodb_mongod_collstats_", "mongodb_mongos_collstats_"}, Message: "Database, collection, and object counts from dbStats/collStats collectors. Missing means database/collection counts cannot be answered from metrics."},
 			{Name: "dbstats", Any: []string{"mongodb_dbstats_dataSize", "mongodb_dbstats_storageSize", "mongodb_dbstats_indexSize", "mongodb_dbstats_objects"}, Prefixes: []string{"mongodb_dbstats_"}, Message: "Optional dbStats collector metrics by database."},
 			{Name: "dbstats_free_storage", Any: []string{"mongodb_dbstats_freeStorageSize", "mongodb_dbstats_totalFreeStorageSize", "mongodb_dbstats_indexFreeStorageSize"}, Prefixes: []string{"mongodb_dbstats_free", "mongodb_dbstats_totalFree", "mongodb_dbstats_indexFree"}, Message: "Optional dbStats free-storage metrics when dbstatsfreestorage is enabled."},
 			{Name: "topmetrics", Any: []string{"mongodb_top_total_count", "mongodb_top_queries_count", "mongodb_top_insert_count", "mongodb_top_update_count", "mongodb_top_remove_count"}, Prefixes: []string{"mongodb_top_"}, Message: "Optional top collector per-namespace operation counters and time."},
@@ -1087,12 +1118,12 @@ func databaseCapabilitySpecs(dbType string) []databaseCapabilitySpec {
 }
 
 func evaluateDatabaseCapability(spec databaseCapabilitySpec, discovered map[string]struct{}) DatabaseCapability {
-	present := make([]string, 0, len(spec.All)+len(spec.Any)+len(spec.Prefixes))
+	presentSet := map[string]struct{}{}
 	missing := make([]string, 0, len(spec.All)+len(spec.Any)+len(spec.Prefixes))
 	requiredMissing := missingRequired(spec.All, discovered)
 	for _, name := range spec.All {
 		if _, ok := discovered[name]; ok {
-			present = append(present, name)
+			presentSet[name] = struct{}{}
 		} else {
 			missing = append(missing, name)
 		}
@@ -1100,7 +1131,7 @@ func evaluateDatabaseCapability(spec databaseCapabilitySpec, discovered map[stri
 	anyPresent := 0
 	for _, name := range spec.Any {
 		if _, ok := discovered[name]; ok {
-			present = append(present, name)
+			presentSet[name] = struct{}{}
 			anyPresent++
 		} else {
 			missing = append(missing, name)
@@ -1108,14 +1139,17 @@ func evaluateDatabaseCapability(spec databaseCapabilitySpec, discovered map[stri
 	}
 	prefixPresent := 0
 	for _, prefix := range spec.Prefixes {
-		prefixLabel := prefix + "*"
-		if hasMetricPrefix(discovered, prefix) {
-			present = append(present, prefixLabel)
+		matches := metricNamesWithPrefix(discovered, prefix)
+		if len(matches) > 0 {
+			for _, name := range matches {
+				presentSet[name] = struct{}{}
+			}
 			prefixPresent++
 		} else {
-			missing = append(missing, prefixLabel)
+			missing = append(missing, prefix+"*")
 		}
 	}
+	present := sortedMetricNames(presentSet)
 	status := "available"
 	switch {
 	case len(spec.All) > 0 && len(requiredMissing) > 0:
@@ -1133,15 +1167,76 @@ func evaluateDatabaseCapability(spec databaseCapabilitySpec, discovered map[stri
 	return DatabaseCapability{
 		Name:           spec.Name,
 		Status:         status,
-		Metrics:        present,
+		MetricCount:    len(present),
+		Metrics:        limitStrings(present, maxDatabaseCapabilityMetricNames),
 		MissingMetrics: missing,
 		Message:        spec.Message,
 	}
 }
 
 func hasMetricPrefix(discovered map[string]struct{}, prefix string) bool {
+	return len(metricNamesWithPrefix(discovered, prefix)) > 0
+}
+
+func sortedMetricNames(items map[string]struct{}) []string {
+	names := make([]string, 0, len(items))
+	for name := range items {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func metricNamesWithPrefix(discovered map[string]struct{}, prefix string) []string {
+	matches := []string{}
 	for name := range discovered {
 		if strings.HasPrefix(name, prefix) {
+			matches = append(matches, name)
+		}
+	}
+	sort.Strings(matches)
+	return matches
+}
+
+func limitStrings(items []string, limit int) []string {
+	if limit <= 0 || len(items) <= limit {
+		return items
+	}
+	return append([]string(nil), items[:limit]...)
+}
+
+func unmappedDatabaseMetricNames(dbType string, discovered map[string]struct{}) []string {
+	specs := databaseCapabilitySpecs(dbType)
+	out := []string{}
+	for name := range discovered {
+		mapped := false
+		for _, spec := range specs {
+			if metricMatchesCapabilitySpec(name, spec) {
+				mapped = true
+				break
+			}
+		}
+		if !mapped {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func metricMatchesCapabilitySpec(metric string, spec databaseCapabilitySpec) bool {
+	for _, name := range spec.All {
+		if metric == name {
+			return true
+		}
+	}
+	for _, name := range spec.Any {
+		if metric == name {
+			return true
+		}
+	}
+	for _, prefix := range spec.Prefixes {
+		if strings.HasPrefix(metric, prefix) {
 			return true
 		}
 	}
@@ -1156,6 +1251,76 @@ func missingRequired(names []string, discovered map[string]struct{}) []string {
 		}
 	}
 	return missing
+}
+
+func (r databaseStatusRunner) analyzeDatabaseObjectInventory(ctx context.Context, dbType, selector string, discovered map[string]struct{}, row *DatabaseStatusSource) {
+	recorded := false
+	switch dbType {
+	case "mysql":
+		if hasAnyMetrics(discovered, []string{"mysql_info_schema_table_size_data_length", "mysql_info_schema_table_size_index_length"}) {
+			metric := "mysql_info_schema_table_size_data_length"
+			if _, ok := discovered[metric]; !ok {
+				metric = "mysql_info_schema_table_size_index_length"
+			}
+			r.recordScalarQuery(ctx, discovered, row, "schema_count",
+				fmt.Sprintf("count(count by (schema) (%s{%s}))", metric, selector),
+				[]string{metric})
+			r.recordScalarQuery(ctx, discovered, row, "table_count",
+				fmt.Sprintf("count(count by (schema, table) (%s{%s}))", metric, selector),
+				[]string{metric})
+			recorded = true
+		}
+	case "postgresql":
+		if hasRequiredMetrics(discovered, []string{"pg_database_size_bytes"}) {
+			r.recordScalarQuery(ctx, discovered, row, "database_count",
+				fmt.Sprintf("count(count by (datname) (pg_database_size_bytes{%s}))", selector),
+				[]string{"pg_database_size_bytes"})
+			recorded = true
+		}
+		if hasRequiredMetrics(discovered, []string{"pg_stat_user_tables_n_live_tup"}) {
+			r.recordScalarQuery(ctx, discovered, row, "table_count",
+				fmt.Sprintf("count(count by (schemaname, relname) (pg_stat_user_tables_n_live_tup{%s}))", selector),
+				[]string{"pg_stat_user_tables_n_live_tup"})
+			recorded = true
+		}
+	case "redis":
+		if hasRequiredMetrics(discovered, []string{"redis_db_keys"}) {
+			r.recordScalarQuery(ctx, discovered, row, "logical_database_count",
+				fmt.Sprintf("count(count by (db) (redis_db_keys{%s}))", selector),
+				[]string{"redis_db_keys"})
+			r.recordScalarQuery(ctx, discovered, row, "key_count",
+				fmt.Sprintf("sum(redis_db_keys{%s})", selector),
+				[]string{"redis_db_keys"})
+			recorded = true
+		}
+	case "mongodb":
+		if hasRequiredMetrics(discovered, []string{"mongodb_dbstats_dataSize"}) {
+			r.recordScalarQuery(ctx, discovered, row, "database_count",
+				fmt.Sprintf("count(count by (database) (mongodb_dbstats_dataSize{%s}))", selector),
+				[]string{"mongodb_dbstats_dataSize"})
+			recorded = true
+		}
+		if hasRequiredMetrics(discovered, []string{"mongodb_collstats_storageStats_count"}) {
+			r.recordScalarQuery(ctx, discovered, row, "collection_count",
+				fmt.Sprintf("count(count by (database, collection) (mongodb_collstats_storageStats_count{%s}))", selector),
+				[]string{"mongodb_collstats_storageStats_count"})
+			recorded = true
+		}
+		if hasRequiredMetrics(discovered, []string{"mongodb_dbstats_objects"}) {
+			r.recordScalarQuery(ctx, discovered, row, "object_count",
+				fmt.Sprintf("sum(mongodb_dbstats_objects{%s})", selector),
+				[]string{"mongodb_dbstats_objects"})
+			recorded = true
+		}
+	}
+	if !recorded {
+		row.Findings = append(row.Findings, DatabaseStatusFinding{
+			Severity: "info",
+			Code:     "database_object_inventory_missing",
+			Title:    "未采集数据库对象清单指标",
+			Message:  "当前 exporter 指标不能直接回答库/表/集合/key 数量；查看 capabilities 中 object_inventory 的 missing_metrics。",
+		})
+	}
 }
 
 func (r databaseStatusRunner) analyzeMySQL(ctx context.Context, selector string, discovered map[string]struct{}, row *DatabaseStatusSource) {

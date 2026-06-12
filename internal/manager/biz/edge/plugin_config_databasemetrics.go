@@ -88,13 +88,11 @@ func (uc *PluginConfigUC) writeDatabaseMetricsSecrets(ctx context.Context, edgeI
 	if uc.secretWriter == nil {
 		return fmt.Errorf("databasemetrics secret writer is not configured")
 	}
-	for _, secretReq := range secretReqs {
-		writeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-		err := uc.secretWriter.WriteDatabaseMetricsSecret(writeCtx, edgeID, secretReq)
-		cancel()
-		if err != nil {
-			return fmt.Errorf("write databasemetrics secret source %q: %w", secretReq.SourceID, err)
-		}
+	writeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	err := uc.secretWriter.WriteDatabaseMetricsSecrets(writeCtx, edgeID, secretReqs)
+	cancel()
+	if err != nil {
+		return fmt.Errorf("write databasemetrics secrets: %w", err)
 	}
 	return nil
 }

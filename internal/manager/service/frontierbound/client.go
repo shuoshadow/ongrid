@@ -144,13 +144,13 @@ func (c *Client) Call(ctx context.Context, edgeID uint64, method string, body []
 	return rsp.Data(), nil
 }
 
-// WriteDatabaseMetricsSecret asks the edge to write one managed database
-// exporter credential file. The request content is secret material and is not
-// persisted by the manager.
-func (c *Client) WriteDatabaseMetricsSecret(ctx context.Context, edgeID uint64, req tunnel.WriteDatabaseMetricsSecretRequest) error {
-	body, err := json.Marshal(req)
+// WriteDatabaseMetricsSecrets asks the edge to write managed database exporter
+// credential files as one batch. The request content is secret material and is
+// not persisted by the manager.
+func (c *Client) WriteDatabaseMetricsSecrets(ctx context.Context, edgeID uint64, reqs []tunnel.WriteDatabaseMetricsSecretRequest) error {
+	body, err := json.Marshal(tunnel.WriteDatabaseMetricsSecretsRequest{Secrets: reqs})
 	if err != nil {
-		return fmt.Errorf("marshal write database metrics secret req: %w", err)
+		return fmt.Errorf("marshal write database metrics secrets req: %w", err)
 	}
 	respBody, err := c.Call(ctx, edgeID, tunnel.MethodWriteDatabaseMetricsSecret, body)
 	if err != nil {
@@ -158,10 +158,10 @@ func (c *Client) WriteDatabaseMetricsSecret(ctx context.Context, edgeID uint64, 
 	}
 	var resp tunnel.WriteDatabaseMetricsSecretResponse
 	if err := json.Unmarshal(respBody, &resp); err != nil {
-		return fmt.Errorf("unmarshal write database metrics secret resp: %w", err)
+		return fmt.Errorf("unmarshal write database metrics secrets resp: %w", err)
 	}
 	if !resp.OK {
-		return fmt.Errorf("write database metrics secret rejected")
+		return fmt.Errorf("write database metrics secrets rejected")
 	}
 	return nil
 }

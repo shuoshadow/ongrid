@@ -72,12 +72,14 @@ func (fakeEndpointResolver) Endpoint(_ context.Context, plugin string) string {
 }
 
 type fakeDatabaseSecretWriter struct {
-	reqs []tunnel.WriteDatabaseMetricsSecretRequest
-	err  error
+	calls int
+	reqs  []tunnel.WriteDatabaseMetricsSecretRequest
+	err   error
 }
 
-func (w *fakeDatabaseSecretWriter) WriteDatabaseMetricsSecret(_ context.Context, _ uint64, req tunnel.WriteDatabaseMetricsSecretRequest) error {
-	w.reqs = append(w.reqs, req)
+func (w *fakeDatabaseSecretWriter) WriteDatabaseMetricsSecrets(_ context.Context, _ uint64, reqs []tunnel.WriteDatabaseMetricsSecretRequest) error {
+	w.calls++
+	w.reqs = append(w.reqs, reqs...)
 	if w.err != nil {
 		return w.err
 	}
@@ -169,6 +171,17 @@ func TestSetDatabaseMetrics_WhenUpsertFails_DoesNotWriteSecret(t *testing.T) {
 						"sslmode":  "disable",
 					},
 				},
+				map[string]interface{}{
+					"id":             "redis-prod",
+					"db_type":        "redis",
+					"listen_address": "127.0.0.1:19121",
+					"credentials": map[string]interface{}{
+						"host":     "127.0.0.1",
+						"port":     "16379",
+						"password": "redis-secret",
+						"database": "0",
+					},
+				},
 			},
 		},
 	})
@@ -214,6 +227,17 @@ func TestSetDatabaseMetrics_WhenSecretWriteFails_RollsBackConfig(t *testing.T) {
 						"sslmode":  "disable",
 					},
 				},
+				map[string]interface{}{
+					"id":             "redis-prod",
+					"db_type":        "redis",
+					"listen_address": "127.0.0.1:19121",
+					"credentials": map[string]interface{}{
+						"host":     "127.0.0.1",
+						"port":     "16379",
+						"password": "redis-secret",
+						"database": "0",
+					},
+				},
 			},
 		},
 	})
@@ -223,8 +247,11 @@ func TestSetDatabaseMetrics_WhenSecretWriteFails_RollsBackConfig(t *testing.T) {
 	if !strings.Contains(err.Error(), "edge tunnel unavailable") {
 		t.Fatalf("Set() error = %v", err)
 	}
-	if len(writer.reqs) != 1 {
-		t.Fatalf("secret writes = %d, want 1", len(writer.reqs))
+	if writer.calls != 1 {
+		t.Fatalf("secret writer calls = %d, want 1", writer.calls)
+	}
+	if len(writer.reqs) != 2 {
+		t.Fatalf("secret writes = %d, want 2", len(writer.reqs))
 	}
 	got := repo.rows[model.PluginNameDatabaseMetrics]
 	if got == nil {

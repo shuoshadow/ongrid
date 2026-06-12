@@ -61,6 +61,45 @@ func TestWriteManagedSecretInBaseRejectsSymlink(t *testing.T) {
 	}
 }
 
+func TestWriteManagedSecretsInBase_WhenLaterRequestInvalid_LeavesEarlierSecretUnchanged(t *testing.T) {
+	base := t.TempDir()
+	mysqlPath := filepath.Join(base, "mysql-prod.my.cnf")
+	if err := os.WriteFile(mysqlPath, []byte("old-mysql\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	symlinkTarget := filepath.Join(base, "target.dsn")
+	symlinkPath := filepath.Join(base, "redis-prod.dsn")
+	if err := os.WriteFile(symlinkTarget, []byte("old-redis\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := os.Symlink(symlinkTarget, symlinkPath); err != nil {
+		t.Fatalf("Symlink() error = %v", err)
+	}
+
+	err := writeManagedSecretsInBase(context.Background(), base, []tunnel.WriteDatabaseMetricsSecretRequest{
+		{
+			SourceID: "mysql-prod",
+			Path:     mysqlPath,
+			Content:  "[client]\nuser=new",
+		},
+		{
+			SourceID: "redis-prod",
+			Path:     symlinkPath,
+			Content:  "redis://127.0.0.1:6379/0",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "refusing symlink path") {
+		t.Fatalf("error = %v, want refusing symlink path", err)
+	}
+	blob, err := os.ReadFile(mysqlPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if got := string(blob); got != "old-mysql\n" {
+		t.Fatalf("mysql secret = %q, want old content unchanged", got)
+	}
+}
+
 func TestBuildManagedSecretPreservingPasswordForPostgresSkipVerify(t *testing.T) {
 	base := t.TempDir()
 	path := filepath.Join(base, "pg-prod.dsn")
