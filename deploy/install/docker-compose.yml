@@ -67,6 +67,10 @@ services:
       ONGRID_DB_DIALECT: mysql
       ONGRID_DB_DSN: ongrid:${MYSQL_PASSWORD}@tcp(mysql:3306)/ongrid?parseTime=true&charset=utf8mb4&loc=Local
       ONGRID_JWT_SECRET: ${ONGRID_JWT_SECRET:?ONGRID_JWT_SECRET is required in .env}
+      # HLD-017 credential vault at-rest key (AES-256-GCM). Lives in .env
+      # (outside the DB) so a DB dump alone yields no plaintext credentials.
+      # Unset → an insecure built-in key + a boot warning; set 32+ random chars.
+      ONGRID_SECRET_KEY: ${ONGRID_SECRET_KEY:-}
       ONGRID_JWT_ACCESS_TTL: ${ONGRID_JWT_ACCESS_TTL:-15m}
       ONGRID_JWT_REFRESH_TTL: ${ONGRID_JWT_REFRESH_TTL:-720h}
       ONGRID_ADMIN_EMAIL: ${ONGRID_ADMIN_EMAIL:-}
