@@ -1,10 +1,11 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Cloud, Cpu, Wrench, RefreshCw, Play, Search } from 'lucide-react';
+import { Cloud, Cpu, Wrench, RefreshCw, Play, Search, Package } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { listSkills, localizedSkill, type SkillClass, type SkillScope, type SkillSummary } from '@/api/skills';
 import { ApiError } from '@/api/client';
 import { useI18n } from '@/i18n/locale';
+import { useAuth } from '@/store/auth';
 
 // Lazy-load the install/uninstall surface so the default Catalog tab
 // doesn't pull in the marketplace bundle until the operator actually
@@ -16,33 +17,59 @@ type Tab = 'catalog' | 'install';
 
 export default function SkillsPage() {
   const { tr } = useI18n();
-  // Tab is URL-driven. The Install tab has no visible toggle today
-  // (see comment below), but `/skills?tab=install` still resolves to
-  // the install surface for power-user / dev use.
-  const [searchParams] = useSearchParams();
-  const tab: Tab = searchParams.get('tab') === 'install' ? 'install' : 'catalog';
+  // Tab is URL-driven (?tab=install). HLD-017: the install surface is now
+  // a visible, admin-only toggle (re-surfaced 2026-06-21 for the cloud
+  // skill marketplace). Non-admins only ever see the catalog.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const isAdmin = useAuth((s) => s.role) === 'admin';
+  const tab: Tab = searchParams.get('tab') === 'install' && isAdmin ? 'install' : 'catalog';
 
-  // Install tab is hidden from the visible nav (2026-05-19): no public
-  // AIOps skill ecosystem exists, coding-agent catalogs are domain-
-  // mismatched, and external skills without matching BaseTools just
-  // give the LLM aspirational docs. The install surface is still
-  // reachable via /skills?tab=install for power users / dev verification,
-  // and all backend (/v1/marketplace/*, three container-kind detectors,
-  // builtin-preserving Reload) stays intact so flipping the flag back
-  // to surfaced is a one-line UI change.
-  if (tab === 'install') {
-    return (
-      <main className="anim-fade flex flex-1 flex-col overflow-hidden">
+  const setTab = (t: Tab) => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (t === 'install') next.set('tab', 'install');
+        else next.delete('tab');
+        return next;
+      },
+      { replace: true }
+    );
+  };
+
+  return (
+    <main className="anim-fade flex flex-1 flex-col overflow-hidden">
+      {isAdmin && (
+        <div className="flex items-center gap-1 border-b border-zinc-800 px-4 pt-3">
+          <TabButton active={tab === 'catalog'} onClick={() => setTab('catalog')} icon={<Wrench size={14} />} label={tr('技能目录', 'Catalog')} />
+          <TabButton active={tab === 'install'} onClick={() => setTab('install')} icon={<Package size={14} />} label={tr('技能市场', 'Marketplace')} />
+        </div>
+      )}
+      {tab === 'install' ? (
         <Suspense fallback={<div className="flex h-40 items-center justify-center text-sm text-zinc-500">{tr('加载中…', 'Loading…')}</div>}>
           <InstallTab />
         </Suspense>
-      </main>
-    );
-  }
-  return (
-    <main className="anim-fade flex flex-1 flex-col overflow-hidden">
-      <CatalogTab />
+      ) : (
+        <CatalogTab />
+      )}
     </main>
+  );
+}
+
+function TabButton({ active, onClick, icon, label }: { active: boolean; onClick: () => void; icon: ReactNode; label: string }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'inline-flex items-center gap-1.5 border-b-2 px-3 py-2 text-[13px] font-medium transition-colors',
+        active
+          ? 'border-indigo-500 text-zinc-100'
+          : 'border-transparent text-zinc-500 hover:text-zinc-300'
+      )}
+    >
+      {icon}
+      {label}
+    </button>
   );
 }
 

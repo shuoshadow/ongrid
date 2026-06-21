@@ -222,6 +222,12 @@ services:
       # cp + setting ONGRID_EMBEDDING_MODEL. Read-write because
       # fastembed-go writes its own download-progress lock files.
       - ${ONGRID_DATA_DIR:-/var/lib/ongrid}/embeddings:/var/lib/ongrid/embeddings
+      # HLD-017 cloud skill marketplace: user-installed skills land in
+      # ONGRID_SKILLS_ROOT (=/var/lib/ongrid/skills in-container). MUST be a
+      # host bind-mount — otherwise installed skills live only in the
+      # container layer and are wiped on every `compose up` / image upgrade
+      # (the installed_skills DB row would survive in mysql and dangle).
+      - ${ONGRID_DATA_DIR:-/var/lib/ongrid}/skills:/var/lib/ongrid/skills
     logging:
       driver: json-file
       options:
