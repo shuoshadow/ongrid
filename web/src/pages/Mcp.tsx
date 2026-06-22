@@ -157,33 +157,40 @@ export default function McpPage() {
   );
 
   return (
-    <div className="anim-fade space-y-5">
-      <div className="flex items-center gap-2">
-        <Plug size={18} className="text-zinc-400" />
-        <h1 className="text-lg font-semibold text-zinc-100">{tr('MCP 服务', 'MCP servers')}</h1>
-        <div className="ml-auto flex items-center gap-1.5">
-          <Button onClick={() => void refresh()} disabled={loading} variant="ghost">
-            {loading ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
-            {tr('刷新', 'Refresh')}
-          </Button>
-          {isAdmin && (
-            <Button onClick={() => setEditing({ id: null, input: emptyInput() })} variant="subtle">
-              <Plus size={13} />
-              {tr('新建', 'New server')}
+    <main className="anim-fade flex flex-1 flex-col overflow-hidden">
+      <header className="app-header border-b border-zinc-800 px-6 py-4">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <Plug size={18} className="text-zinc-400" />
+              <h1 className="text-base font-semibold text-zinc-100">{tr('MCP 服务', 'MCP servers')}</h1>
+            </div>
+            <p className="mt-1 max-w-3xl text-xs leading-relaxed text-zinc-500">
+              {tr(
+                '注册外部 MCP server 后，它暴露的工具会进入 Agent / Workflow 工具箱。工具执行默认需要人工确认；标记为 trusted 的服务免审直跑（仅建议给只读服务）。',
+                'Registered external MCP servers expose tools into the Agent / Workflow toolbag. Tool execution requires human approval by default; servers marked trusted run without approval (recommended for read-only servers only).',
+              )}
+              {!isAdmin && (
+                <span className="ml-1 text-amber-400">{tr('仅 admin 可增删改。', 'Only admins can add / edit / remove.')}</span>
+              )}
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <Button onClick={() => void refresh()} disabled={loading} variant="ghost">
+              {loading ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
+              {tr('刷新', 'Refresh')}
             </Button>
-          )}
+            {isAdmin && (
+              <Button onClick={() => setEditing({ id: null, input: emptyInput() })} variant="subtle">
+                <Plus size={13} />
+                {tr('新建', 'New server')}
+              </Button>
+            )}
+          </div>
         </div>
-      </div>
+      </header>
 
-      <p className="text-[13px] leading-relaxed text-zinc-500">
-        {tr(
-          '注册外部 MCP server 后，它暴露的工具会进入 Agent / Workflow 工具箱。工具执行默认需要人工确认；标记为 trusted 的服务免审直跑（仅建议给只读服务）。',
-          'Registered external MCP servers expose tools into the Agent / Workflow toolbag. Tool execution requires human approval by default; servers marked trusted run without approval (recommended for read-only servers only).',
-        )}
-        {!isAdmin && (
-          <span className="ml-1 text-amber-400">{tr('仅 admin 可增删改。', 'Only admins can add / edit / remove.')}</span>
-        )}
-      </p>
+      <div className="flex-1 space-y-4 overflow-auto px-6 py-4">
 
       {err && (
         <div className="rounded-md border border-red-900/50 bg-red-950/30 px-3 py-2 text-[12px] text-red-400">{err}</div>
@@ -276,7 +283,8 @@ export default function McpPage() {
           {toast.text}
         </div>
       )}
-    </div>
+      </div>
+    </main>
   );
 }
 
