@@ -1,14 +1,15 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Cloud, Cpu, Wrench, RefreshCw, Play, Search, Puzzle, Sparkles } from 'lucide-react';
+import { Cloud, Cpu, Wrench, RefreshCw, Play, Search, Puzzle } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { listSkills, localizedSkill, type SkillClass, type SkillScope, type SkillSummary } from '@/api/skills';
 import { createSession } from '@/api/chat';
 import { ApiError } from '@/api/client';
 import { Modal } from '@/components/Modal';
+import { ChatInput } from '@/components/ChatInput';
 import { useI18n } from '@/i18n/locale';
 import { useAuth } from '@/store/auth';
-import { Button, PageHeader } from '@/components/ui';
+import { PageHeader } from '@/components/ui';
 
 // Lazy-load the install/uninstall surface so the default Catalog tab
 // doesn't pull in the marketplace bundle until the operator actually
@@ -76,8 +77,8 @@ function InstallChatBar() {
   const navigate = useNavigate();
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
-  const start = async () => {
-    const v = draft.trim();
+  const start = async (text: string) => {
+    const v = text.trim();
     if (!v || busy) return;
     setBusy(true);
     try {
@@ -91,32 +92,22 @@ function InstallChatBar() {
       setBusy(false);
     }
   };
+  // Reuse the Home composer (ChatInput) so the conversational-install entry
+  // looks and behaves like the main chat box — wide, single composer. It opens
+  // a fresh thread pre-seeded with the request; the agent's install_skill tool
+  // (+ the human-approval card) takes over there.
   return (
-    <div className="mb-4 rounded-lg border border-zinc-800/80 bg-zinc-950/40 p-3">
-      <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-zinc-400">
-        <Sparkles size={12} className="text-indigo-400" />
-        {tr('对话式安装', 'Install by chat')}
-      </div>
-      <p className="mb-2 text-[11px] text-zinc-500">
-        {tr(
-          '贴一个技能源地址（git / tarball / skills.sh），或直接描述你想要的能力，交给助手装。安装前需你确认。',
-          'Paste a skill source (git / tarball / skills.sh), or just describe the capability you want — the assistant installs it, with your approval first.',
+    <div className="mb-5">
+      <ChatInput
+        value={draft}
+        onChange={setDraft}
+        onSubmit={(p) => void start(p.text)}
+        placeholder={tr(
+          '贴个技能源（git / tarball / skills.sh），或描述你想要的能力，交给助手装…',
+          'Paste a skill source (git / tarball / skills.sh), or describe a capability — let the assistant install it…',
         )}
-      </p>
-      <div className="flex items-center gap-2">
-        <input
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') void start();
-          }}
-          placeholder={tr('例如：帮我装 https://github.com/owner/skill', 'e.g. install https://github.com/owner/skill')}
-          className="flex-1 rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-600 focus:border-indigo-500 focus:outline-none"
-        />
-        <Button onClick={() => void start()} disabled={busy || !draft.trim()} variant="primary">
-          {tr('交给助手', 'Ask assistant')}
-        </Button>
-      </div>
+        disabled={busy}
+      />
     </div>
   );
 }
