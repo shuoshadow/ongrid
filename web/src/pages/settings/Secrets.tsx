@@ -110,25 +110,27 @@ export default function SecretsPage() {
 
   return (
     <div className="anim-fade space-y-5">
-      <div className="flex items-center gap-2">
-        <Lock size={18} className="text-zinc-400" />
-        <h1 className="text-lg font-semibold text-zinc-100">{tr('凭证', 'Credentials')}</h1>
-        <button
-          type="button"
-          onClick={() => void load()}
-          className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-zinc-700 px-2 py-1 text-[12px] text-zinc-300 hover:bg-zinc-800"
-        >
-          <RefreshCw size={13} />
-          {tr('刷新', 'Refresh')}
-        </button>
-      </div>
-
-      <p className="text-[13px] leading-relaxed text-zinc-500">
+      {/* SettingsLayout already provides the page-level header — we render
+          content only, matching the other settings sub-pages (a description
+          card with a small icon, not a separate h1 title). */}
+      <div className="rounded-lg border border-zinc-800/60 bg-zinc-900/30 px-4 py-3 text-xs leading-relaxed text-zinc-400">
+        <div className="mb-1 flex items-center gap-2 text-zinc-200">
+          <Lock size={14} className="text-zinc-400" />
+          <span className="font-medium">{tr('凭证 — 凭据库', 'Credentials — vault')}</span>
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-zinc-700 px-2 py-1 text-[11px] text-zinc-300 hover:bg-zinc-800"
+          >
+            <RefreshCw size={12} />
+            {tr('刷新', 'Refresh')}
+          </button>
+        </div>
         {tr(
           '凭据库。选一个类型（腾讯云 / AWS / GitHub …）会自动列出该填的字段，并自带"注入到哪些环境变量"的规则；技能 / 外部 MCP 用上这份凭据时按类型规则注入。类型选"自定义"则自由填字段，按同名环境变量注入。字段值只写不读，AES 加密落库（设 ONGRID_SECRET_KEY）。',
           'Credential vault. Pick a type (Tencent Cloud / AWS / GitHub …) and it lists the right fields plus a built-in "which env vars to inject" rule; skills / external MCP that use this credential inject by that rule. Pick "Custom" to enter free-form fields injected as same-named env vars. Values are write-only and AES-encrypted at rest (set ONGRID_SECRET_KEY).'
         )}
-      </p>
+      </div>
 
       {err && (
         <div className="rounded-md border border-red-900/50 bg-red-950/30 px-3 py-2 text-[12px] text-red-400">{err}</div>

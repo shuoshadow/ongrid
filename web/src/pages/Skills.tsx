@@ -374,7 +374,7 @@ function CatalogTab() {
                         <td colSpan={5} className="px-3 py-2">
                           <div className="flex items-center gap-1.5">
                             {isCollapsed ? <ChevronRight size={13} className="text-zinc-500" /> : <ChevronDown size={13} className="text-zinc-500" />}
-                            <span className="text-[13px] font-semibold text-zinc-200">
+                            <span className="text-sm font-medium text-zinc-200">
                               {groupTitle(gk, locale === 'zh-CN', rows[0]?.name)}
                             </span>
                             {tag === 'mcp' && <span className="rounded bg-sky-900/40 px-1 text-[9px] font-medium text-sky-300">mcp</span>}
@@ -434,7 +434,7 @@ function SkillRow({ skill, displayName, onView }: { skill: SkillSummary; display
   return (
     <tr className="cursor-pointer transition-colors hover:bg-zinc-900/40" onClick={onView}>
       <td className="whitespace-nowrap px-4 py-1.5 pl-8">
-        <span className="text-[13px] text-zinc-200">{displayName ?? skill.name}</span>
+        <span className="text-xs text-zinc-200">{displayName ?? skill.name}</span>
         <div className="font-mono text-[10px] text-zinc-600" title={skill.key}>
           {skill.key}
         </div>
