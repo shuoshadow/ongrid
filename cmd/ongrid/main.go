@@ -1850,6 +1850,16 @@ func main() {
 		if err != nil {
 			return "", err
 		}
+		// Give the command a writable HOME. The runner passes ONLY this env map
+		// to the child (it does NOT inherit the manager's environment), so
+		// without this HOME is unset and any tool that writes a dotdir on
+		// startup — tccli → ~/.tccli, awscli → ~/.aws, terraform plugin cache —
+		// fails with a permission/HOME error (the sandbox is non-root and the
+		// passwd home doesn't exist). Point HOME at the session's persistent
+		// workspace so that per-tool state also survives across commands.
+		if workdir != "" {
+			env["HOME"] = workdir
+		}
 		res, err := cloudBashRunner.Run(ctx, runner.Spec{Script: p.Command, Env: env, Workdir: workdir})
 		if err != nil {
 			return "", err
@@ -3275,7 +3285,7 @@ func ongridBasePrompt() string {
 
 	    **RAG-first 例外**：用户是在要求创建告警规则时，不要 query_knowledge，也不要 list_database_sources；按对话式配置规则处理。指标型告警先 ` + bt + `list_metric_catalog` + bt + ` 一次，必要时再 ` + bt + `analyze_database_status` + bt + ` 一次；catalog 有可用指标后再调用 draft_config_change；catalog 为空/不可用时说明缺失并停止；draft_config_change 返回 config_validation_failed 时按 validation.issues 修复并重试，不让用户确认；返回 config_draft/draft_hash 后停止工具调用并等待确认；禁止只输出文字草案，必须有 config_draft/draft_hash 后才能要求确认。确认 apply 时必须使用 config_draft 原始 payload/draft_hash。其它配置类需求说明 v1 暂不支持。
 
-12. **云端执行（cloud_bash）**：需要在云端（manager 侧）跑命令——terraform / 云厂商 CLI / kubectl，或按已安装技能的指导执行操作——用 ` + bt + `cloud_bash` + bt + `。它**不会立即执行**，只把命令提交人工审批，对话里会直接弹出确认卡片，用户批准后才运行；需要云凭证时带 credential 参数（凭证库里的名字），已激活技能绑定的凭证也会自动注入。这是你能直接做的，不必派 specialist，但**不要**引导用户去任何页面（确认就在对话里）。
+12. **云端执行（cloud_bash）**：需要在云端（manager 侧）跑命令——云厂商 CLI（腾讯云用 ` + bt + `tccli` + bt + `、AWS 用 ` + bt + `awscli` + bt + ` 等）、` + bt + `terraform` + bt + `，或按已安装技能的指导执行操作——用 ` + bt + `cloud_bash` + bt + `。**查看 / 操作某个云厂商的资源时，直接用该厂商的 CLI（腾讯云资源 → ` + bt + `tccli` + bt + `，带上腾讯云凭证），不要假设环境是 Kubernetes、不要上来就 ` + bt + `kubectl` + bt + ` 或检查集群配置——除非用户明确提到 k8s / 集群 / pod / namespace。** 它**不会立即执行**，只把命令提交人工审批，对话里会直接弹出确认卡片，用户批准后才运行；需要云凭证时带 credential 参数（凭证库里的名字），已激活技能绑定的凭证也会自动注入。这是你能直接做的，不必派 specialist，但**不要**引导用户去任何页面（确认就在对话里）。
 `)
 }
 
