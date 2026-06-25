@@ -192,6 +192,26 @@ export default function McpPage() {
           </>
         }
       />
+      {servers.length > 0 && (
+        <div className="border-b border-zinc-800 px-6 py-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="relative block w-64">
+              <span className="sr-only">{tr('搜索', 'Search')}</span>
+              <Search size={12} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
+              <input
+                type="search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder={tr('搜索服务（名称 / 端点）…', 'Search servers (name / endpoint)…')}
+                className="w-full rounded-md border border-zinc-800 bg-zinc-950/40 py-1.5 pl-8 pr-2 text-xs text-zinc-200 placeholder:text-zinc-500 focus:border-zinc-700 focus:outline-none"
+              />
+            </label>
+            <span className="ml-auto text-xs text-zinc-500">
+              {tr(`${servers.length} 个 · 匹配 ${shownServers.length}`, `${servers.length} total · ${shownServers.length} matched`)}
+            </span>
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 space-y-4 overflow-auto px-6 py-4">
 
@@ -218,15 +238,6 @@ export default function McpPage() {
         </Card>
       ) : (
         <div className="space-y-3">
-          <div className="relative">
-            <Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder={tr('搜索服务（名称 / 端点）…', 'Search servers (name / endpoint)…')}
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 py-1.5 pl-8 pr-2 text-xs text-zinc-200 placeholder:text-zinc-500 outline-none focus:border-zinc-600"
-            />
-          </div>
           {shownServers.length === 0 ? (
             <div className="py-10 text-center text-xs text-zinc-500">{tr('无匹配的服务', 'No matching servers')}</div>
           ) : (
