@@ -3765,9 +3765,12 @@ func (m *flowMCPSource) metas(ctx context.Context) []managerbizflow.ToolMeta {
 			Name:        e.wire,
 			DisplayZh:   e.bare,
 			Description: e.desc,
-			Class:       "destructive", // human-authored node; gated at authoring, not per-run
-			Category:    "integration",
-			Parameters:  e.schema,
+			// Infer read vs destructive from the tool name so read-only MCP
+			// tools (k8s list/get/log/...) are single-node test-runnable;
+			// mutating/unknown ones stay gated to full-flow runs.
+			Class:      aiopstools.MCPToolClass(e.bare),
+			Category:   "integration",
+			Parameters: e.schema,
 		})
 	}
 	return out
