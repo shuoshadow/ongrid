@@ -2066,6 +2066,10 @@ func main() {
 		invBag := toolsReg.BuildBaseTools()
 		invBag = aiopstools.AppendHostFilesTools(invBag, fbClient, edgeUC, deviceUC, log)
 		toolsReg.RegisterBaseToolsAsSkills(invBag, log.With(slog.String("comp", "inventory-bridge")))
+		// Re-merge so flow `tool` nodes can run tools registered after the
+		// invoker was first built — cloud_bash (its proposer is wired above)
+		// + host-files tools. Without this they report "unknown tool".
+		flowInvoker.mergeBag(invBag)
 	}
 
 	promProxySvc := managersvcprom.New(signer)
@@ -3642,6 +3646,8 @@ func (s mcpProposerShim) ProposeMCPCall(ctx context.Context, server, tool string
 }
 
 type flowToolInvoker struct {
+	reg   *aiopstools.Registry
+	deps  aiopstoolsdec.Deps
 	tools map[string]aiopstoolsbase.BaseTool
 	// mcp dispatches mcp__ tool nodes LIVE (resolve the current server/tool +
 	// run directly, NO human approval). Wired post-construction once mcpUC
@@ -3650,25 +3656,41 @@ type flowToolInvoker struct {
 }
 
 func newFlowToolInvoker(reg *aiopstools.Registry, registerer prometheus.Registerer) *flowToolInvoker {
-	deps := aiopstoolsdec.Deps{
-		Timeout:    15 * time.Second,
-		Limiter:    aiopstoolsdec.NewTokenBucketLimiter(0),
-		Registerer: registerer,
+	inv := &flowToolInvoker{
+		reg: reg,
+		deps: aiopstoolsdec.Deps{
+			Timeout:    15 * time.Second,
+			Limiter:    aiopstoolsdec.NewTokenBucketLimiter(0),
+			Registerer: registerer,
+		},
+		tools: map[string]aiopstoolsbase.BaseTool{},
 	}
-	m := map[string]aiopstoolsbase.BaseTool{}
-	if bag := reg.BuildBaseTools(); bag != nil {
-		for _, t := range bag.AllTools() {
-			if t == nil {
-				continue
-			}
-			info, err := t.Info(context.Background())
-			if err != nil || info == nil || info.Name == "" {
-				continue
-			}
-			m[info.Name] = aiopstoolsdec.Wrap(t, deps)
+	inv.mergeBag(reg.BuildBaseTools())
+	return inv
+}
+
+// mergeBag adds every tool in bag not already in the invoker map. Some tools
+// register late (cloud_bash once its proposer is wired; host-files tools) —
+// after the invoker was first built — so without a re-merge the flow `tool`
+// node reports "unknown tool" for them. Only NEW names are Wrap'd: re-wrapping
+// an existing tool would double-register its prometheus metric and panic.
+func (s *flowToolInvoker) mergeBag(bag *aiopstools.ToolBag) {
+	if bag == nil {
+		return
+	}
+	for _, t := range bag.AllTools() {
+		if t == nil {
+			continue
 		}
+		info, err := t.Info(context.Background())
+		if err != nil || info == nil || info.Name == "" {
+			continue
+		}
+		if _, exists := s.tools[info.Name]; exists {
+			continue
+		}
+		s.tools[info.Name] = aiopstoolsdec.Wrap(t, s.deps)
 	}
-	return &flowToolInvoker{tools: m}
 }
 
 func (s *flowToolInvoker) InvokeTool(ctx context.Context, name string, args json.RawMessage) (json.RawMessage, error) {
@@ -4056,6 +4078,13 @@ func (c flowToolCatalog) ListTools() []managerbizflow.ToolMeta {
 		// TaskStop steer a live coordinator session, ToolSearch is an
 		// LLM-only schema-fetch affordance. Hide them from the palette.
 		if isControlPlaneTool(info.Name) {
+			continue
+		}
+		// cloud_bash blocks on synchronous human approval (HLD-021); an
+		// automated flow run has no approver, so the node would just hang
+		// until timeout. It belongs in chat — hide it from the flow palette
+		// until flow-level approval exists.
+		if info.Name == "cloud_bash" {
 			continue
 		}
 		out = append(out, managerbizflow.ToolMeta{
