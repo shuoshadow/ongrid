@@ -298,7 +298,7 @@ function CatalogTab() {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder={tr('搜索 name / key / description', 'Search name / key / description')}
-                className="w-full rounded-md border border-zinc-800 bg-zinc-950/40 py-1.5 pl-8 pr-2 text-xs text-zinc-200 placeholder:text-zinc-500 focus:border-zinc-700 focus:outline-none"
+                className="w-full rounded-md border border-zinc-800 bg-zinc-950/40 py-1.5 pl-8 pr-2 text-xs text-zinc-200 placeholder:text-zinc-500 focus:border-zinc-600 focus:outline-none"
               />
             </label>
             <div className="inline-flex items-center gap-1.5 text-xs text-zinc-400">

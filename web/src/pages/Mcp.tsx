@@ -203,7 +203,7 @@ export default function McpPage() {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder={tr('搜索服务（名称 / 端点）…', 'Search servers (name / endpoint)…')}
-                className="w-full rounded-md border border-zinc-800 bg-zinc-950/40 py-1.5 pl-8 pr-2 text-xs text-zinc-200 placeholder:text-zinc-500 focus:border-zinc-700 focus:outline-none"
+                className="w-full rounded-md border border-zinc-800 bg-zinc-950/40 py-1.5 pl-8 pr-2 text-xs text-zinc-200 placeholder:text-zinc-500 focus:border-zinc-600 focus:outline-none"
               />
             </label>
             <span className="ml-auto text-xs text-zinc-500">

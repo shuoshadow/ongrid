@@ -31,6 +31,7 @@ import {
   ChevronRight,
   CircleDot,
   Clock,
+  ExternalLink,
   Globe,
   GitBranch,
   History,
@@ -667,7 +668,7 @@ export default function FlowEditorPage() {
             setFlow({ ...flow, name: e.target.value });
             setDirty(true);
           }}
-          className="min-w-[8rem] max-w-[24rem] rounded-md border border-transparent bg-transparent px-2 py-1 text-[14px] font-medium text-zinc-100 outline-none [field-sizing:content] focus:border-zinc-700"
+          className="min-w-[8rem] max-w-[24rem] rounded-md border border-transparent bg-transparent px-2 py-1 text-[14px] font-medium text-zinc-100 outline-none [field-sizing:content] focus:border-zinc-600"
         />
         <span className="shrink-0 rounded bg-zinc-800 px-1 py-0.5 text-[10px] text-zinc-500">v{flow.version}</span>
         {dirty && <span className="text-[11px] text-amber-500">{tr('未保存', 'Unsaved')}</span>}
@@ -839,7 +840,7 @@ export default function FlowEditorPage() {
                 value={selected.data.label}
                 disabled={!canWrite}
                 onChange={(e) => patchSelected({ label: e.target.value })}
-                className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-[13px] text-zinc-200 outline-none focus:border-indigo-500"
+                className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-[13px] text-zinc-200 outline-none focus:border-zinc-600"
               />
             </label>
             {/* 工具介绍 — tool description (tool nodes only) */}
@@ -1018,6 +1019,17 @@ export default function FlowEditorPage() {
                         <RunStatusChip status={n.status} />
                       </div>
                     </div>
+                    {nodePageURL(n.output) && (
+                      <a
+                        href={nodePageURL(n.output)!}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="mt-1.5 inline-flex items-center gap-1 rounded-md border border-indigo-500/40 bg-indigo-500/10 px-2 py-1 text-[11px] font-medium text-indigo-300 transition-colors hover:bg-indigo-500/20"
+                      >
+                        <ExternalLink size={11} /> {tr('打开生成的网页', 'Open generated page')}
+                      </a>
+                    )}
                     {n.error && <div title={n.error} className="mt-1 break-all text-[11px] text-red-400">{friendlyFlowError(n.error, tr)}</div>}
                     <details className="mt-1">
                       <summary className="cursor-pointer text-[11px] text-zinc-600">{tr('输入 / 输出', 'Input / output')}</summary>
@@ -1093,7 +1105,7 @@ function ConfigField({
               setJsonErr(true);
             }
           }}
-          className={`w-full rounded-md border bg-zinc-950 px-2 py-1.5 font-mono text-[12px] text-zinc-200 outline-none focus:border-indigo-500 ${
+          className={`w-full rounded-md border bg-zinc-950 px-2 py-1.5 font-mono text-[12px] text-zinc-200 outline-none focus:border-zinc-600 ${
             jsonErr ? 'border-red-700' : 'border-zinc-800'
           }`}
         />
@@ -1102,7 +1114,7 @@ function ConfigField({
     );
   }
   const common =
-    'w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-[13px] text-zinc-200 outline-none focus:border-indigo-500';
+    'w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-[13px] text-zinc-200 outline-none focus:border-zinc-600';
   return (
     <label className="mb-3 block">
       <span className="mb-1 block text-[12px] text-zinc-500">{label}</span>
@@ -1192,7 +1204,7 @@ function ToolPalette({
           value={query}
           onChange={(e) => onQuery(e.target.value)}
           placeholder={tr('搜索工具…', 'Search tools…')}
-          className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 text-[12px] text-zinc-200 outline-none focus:border-indigo-500"
+          className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 text-[12px] text-zinc-200 outline-none focus:border-zinc-600"
         />
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-2">
@@ -1411,7 +1423,7 @@ function ToolArgsForm({
                 value={val}
                 disabled={disabled}
                 onChange={(e) => setArg(key, e.target.value, type)}
-                className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-[13px] text-zinc-200 outline-none focus:border-indigo-500"
+                className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-[13px] text-zinc-200 outline-none focus:border-zinc-600"
               >
                 <option value="">{tr('（不设置）', '(unset)')}</option>
                 {(spec.enum as unknown[]).map((o) => (
@@ -1430,7 +1442,7 @@ function ToolArgsForm({
                   else next[key] = e.target.value === 'true';
                   onChange(next);
                 }}
-                className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-[13px] text-zinc-200 outline-none focus:border-indigo-500"
+                className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-[13px] text-zinc-200 outline-none focus:border-zinc-600"
               >
                 <option value="">{tr('（不设置）', '(unset)')}</option>
                 <option value="true">true</option>
@@ -1442,7 +1454,7 @@ function ToolArgsForm({
                 disabled={disabled}
                 placeholder={ph}
                 onChange={(e) => setArg(key, e.target.value, type)}
-                className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-[12px] text-zinc-200 outline-none focus:border-indigo-500"
+                className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-[12px] text-zinc-200 outline-none focus:border-zinc-600"
               />
             )}
           </label>
@@ -1629,6 +1641,18 @@ function friendlyFieldLabel(path: string, locale: string): string {
     if (last && Number(last[0]) > 0) label += ` #${Number(last[0]) + 1}`;
   }
   return label;
+}
+
+// nodePageURL digs a hosted-page URL out of a node's output (serve_page
+// returns {result:{url:"/api/pages/…"}}), so the runs drawer can offer a
+// one-click "open the page this workflow just generated" link.
+function nodePageURL(output: unknown): string | null {
+  if (!output || typeof output !== 'object') return null;
+  const o = output as Record<string, unknown>;
+  const result = o.result && typeof o.result === 'object' ? (o.result as Record<string, unknown>) : undefined;
+  const cand = (result?.url ?? o.url) as unknown;
+  if (typeof cand === 'string' && (cand.startsWith('/api/pages/') || /^https?:\/\//.test(cand))) return cand;
+  return null;
 }
 
 // friendlyFlowError turns a raw backend node error into a clear, localized

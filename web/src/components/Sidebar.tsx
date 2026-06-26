@@ -29,7 +29,6 @@ import {
   Pencil,
   Trash2,
   Share2,
-  Workflow,
   Plug,
   ArrowUpCircle,
 } from 'lucide-react';
@@ -483,7 +482,7 @@ export function Sidebar() {
         <SectionLabel>Agent</SectionLabel>
         <NavSection>
           <SidebarNavItem to="/agents" icon={Bot} label={tr('助理', 'Assistants')} />
-          <SidebarNavItem to="/workflows" icon={Workflow} label={tr('工作流', 'Workflows')} />
+          <SidebarNavItem to="/workflows" icon={Waypoints} label={tr('工作流', 'Workflows')} />
           <SidebarNavItem to="/skills" icon={Wrench} label={tr('技能', 'Skills')} />
           <SidebarNavItem to="/mcp" icon={Plug} label="MCP" />
         </NavSection>

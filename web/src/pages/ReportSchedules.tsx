@@ -384,7 +384,7 @@ function ScheduleForm({
 }
 
 const inputCls =
-  'w-full rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-indigo-500 focus:outline-none';
+  'w-full rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-600 focus:outline-none';
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (

@@ -3,7 +3,7 @@
 // create / open / run / toggle / delete.
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Loader2, Play, Plus, Search, Sparkles, Trash2, Workflow as WorkflowIcon } from 'lucide-react';
+import { Loader2, Play, Plus, Search, Sparkles, Trash2, Waypoints as WorkflowIcon } from 'lucide-react';
 
 import { createFlow, deleteFlow, generateFlow, listFlows, runFlow, toggleFlow, type Flow } from '@/api/flows';
 import { useI18n } from '@/i18n/locale';
@@ -134,7 +134,7 @@ export default function FlowsPage() {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder={tr('搜索工作流…', 'Search workflows…')}
-                className="w-full rounded-md border border-zinc-800 bg-zinc-950/40 py-1.5 pl-8 pr-2 text-xs text-zinc-200 placeholder:text-zinc-500 focus:border-zinc-700 focus:outline-none"
+                className="w-full rounded-md border border-zinc-800 bg-zinc-950/40 py-1.5 pl-8 pr-2 text-xs text-zinc-200 placeholder:text-zinc-500 focus:border-zinc-600 focus:outline-none"
               />
             </label>
             <span className="ml-auto text-xs text-zinc-500">
