@@ -205,8 +205,12 @@ html.light .hover\:border-zinc-500:hover,
 html.light .hover\:border-zinc-600:hover,
 html.light .hover\:border-zinc-700:hover   { border-color: rgb(180 180 195); }
 
-/* focus: variants */
-html.light .focus\:border-zinc-600:focus   { border-color: rgb(140 140 160); }
+/* focus: variants — focused inputs just brighten their own border to a soft
+   gray (no heavy frame, no outer ring). focus-within (the chat composer wraps
+   its textarea in a bordered container) needs the same remap, else the dark
+   zinc-700 border renders near-black on the light theme. */
+html.light .focus\:border-zinc-600:focus              { border-color: rgb(140 140 160); }
+html.light .focus-within\:border-zinc-700:focus-within { border-color: rgb(140 140 160); }
 
 /* In a few places code blocks / inputs use bg-zinc-100 INTENTIONALLY
    light. Keep them as-is by NOT including bg-zinc-100 in the override
