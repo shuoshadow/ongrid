@@ -5,7 +5,7 @@
 // (scripts disabled, opaque origin) so an LLM-generated page can never touch the
 // SPA's session.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ExternalLink, Eye, Loader2, Search, Trash2 } from 'lucide-react';
+import { Check, ExternalLink, Eye, Loader2, Search, Share2, Trash2 } from 'lucide-react';
 
 import { deletePage, listPages, type HostedPage } from '@/api/pages';
 import { useI18n } from '@/i18n/locale';
@@ -59,6 +59,24 @@ export default function PagesPage() {
   const [search, setSearch] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
   const [preview, setPreview] = useState<HostedPage | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  // copyShare copies the absolute, login-free link — the page route is public
+  // (the token is the capability), so this works for anyone, on or off-platform.
+  const copyShare = async (p: HostedPage) => {
+    const link = window.location.origin + p.url;
+    try {
+      await navigator.clipboard.writeText(link);
+    } catch {
+      window.prompt(tr('复制此分享链接：', 'Copy this share link:'), link);
+    }
+    setCopiedId(p.id);
+    window.setTimeout(() => setCopiedId((c) => (c === p.id ? null : c)), 2000);
+  };
+  const shareHint = tr(
+    '复制公开链接：凭链接任何人可看、无需登录；删除该页即失效',
+    'Copy public link: anyone with it can view, no login; delete the page to revoke',
+  );
 
   const refresh = useCallback(async () => {
     try {
@@ -188,6 +206,17 @@ export default function PagesPage() {
                     >
                       <ExternalLink size={13} /> {tr('打开', 'Open')}
                     </a>
+                    <button
+                      type="button"
+                      onClick={() => void copyShare(p)}
+                      title={shareHint}
+                      className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs transition-colors ${
+                        copiedId === p.id ? 'text-emerald-400' : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+                      }`}
+                    >
+                      {copiedId === p.id ? <Check size={13} /> : <Share2 size={13} />}
+                      {copiedId === p.id ? tr('已复制', 'Copied') : tr('分享', 'Share')}
+                    </button>
                     {canWrite && (
                       <Button
                         variant="danger"
@@ -209,9 +238,18 @@ export default function PagesPage() {
       {preview && (
         <Modal open onClose={() => setPreview(null)} size="lg" title={preview.title || tr('页面预览', 'Page preview')}>
           <div className="space-y-2">
-            <div className="flex items-center gap-2 text-[11px] text-zinc-500">
+            <div className="flex items-center gap-3 text-[11px] text-zinc-500">
               <span className="truncate font-mono">{preview.url}</span>
-              <a href={preview.url} target="_blank" rel="noreferrer" className="ml-auto inline-flex shrink-0 items-center gap-1 text-indigo-400 hover:text-indigo-300">
+              <button
+                type="button"
+                onClick={() => void copyShare(preview)}
+                title={shareHint}
+                className={`ml-auto inline-flex shrink-0 items-center gap-1 ${copiedId === preview.id ? 'text-emerald-400' : 'text-indigo-400 hover:text-indigo-300'}`}
+              >
+                {copiedId === preview.id ? <Check size={11} /> : <Share2 size={11} />}
+                {copiedId === preview.id ? tr('已复制', 'Copied') : tr('分享', 'Share')}
+              </button>
+              <a href={preview.url} target="_blank" rel="noreferrer" className="inline-flex shrink-0 items-center gap-1 text-indigo-400 hover:text-indigo-300">
                 <ExternalLink size={11} /> {tr('新标签打开', 'Open in new tab')}
               </a>
             </div>
