@@ -643,14 +643,25 @@ func (rt *Runtime) runWorker(ctx context.Context, agentDef *Agent, sessID, userT
 	invokeOpts = append(invokeOpts, compose.WithToolsNodeOption(
 		compose.WithToolOption(graph.WithInvokeOpts(basetool.WithUserText(userText))),
 	))
+	// Sever the worker's callback chain from the coordinator's. The ctx we
+	// were handed carries the parent graph's callback manager (eino propagates
+	// it into nested Invokes), so WITHOUT this reset the worker's first
+	// ChatModel.OnStart fires the COORDINATOR's PersistenceHandler — whose
+	// flushIncompleteBatch then sees the still-in-flight AgentTool tool_call as
+	// "pending" (AgentTool is blocked right here running this worker) and
+	// autoheals it with an error stub. The coordinator's LLM reads that stub as
+	// "AgentTool unavailable" and gives up. InitCallbacks installs a fresh
+	// manager; the worker's own handlers are registered via WithCallbacks below.
+	workerCtx := einocallbacks.InitCallbacks(ctx, nil)
+
 	// Autoheal any tool batch still open when the worker exits — same
 	// rationale as the parent runtime defer. context.WithoutCancel
 	// keeps the stub inserts running even if the caller cancelled.
 	defer func() {
-		flushCtx := context.WithoutCancel(ctx)
+		flushCtx := context.WithoutCancel(workerCtx)
 		callbacks.FinalizeBatches(flushCtx, handlers)
 	}()
-	out, err := g.Invoke(ctx, &graph.Input{
+	out, err := g.Invoke(workerCtx, &graph.Input{
 		SystemPrompt: systemPrompt,
 		History:      nil,
 		UserText:     userText,
@@ -695,6 +706,15 @@ var coordinatorOnlyTools = map[string]bool{
 	"AgentTool":   true,
 	"SendMessage": true,
 	"TaskStop":    true,
+}
+
+// alwaysAvailableTools survive the read-only strip (write gate OFF / viewer)
+// despite a non-"read" Class, because they only produce a benign read-only
+// artifact (host an HTML page) with no infrastructure side-effect. The write
+// gate exists to guard arbitrary host exec (cloud_bash) / install (destructive),
+// not page generation — so serve_page stays usable in normal chat regardless.
+var alwaysAvailableTools = map[string]bool{
+	"serve_page": true,
 }
 
 // filterToolsForAgent applies the agent persona's whitelist + blacklist
@@ -742,16 +762,30 @@ func filterToolsForAgentRole(bag []basetool.BaseTool, agentDef *Agent, isCoordin
 		// Applies BEFORE persona / control-tool checks so that even the
 		// coordinator chat for a viewer cannot dispatch (AgentTool is
 		// Class="write") or mutate (host_restart_service, etc.).
-		if viewerOnly && info.Class != "read" {
+		// Exception: alwaysAvailableTools (e.g. serve_page) produce a benign,
+		// read-only artifact with no infra side-effect, so the write gate /
+		// viewer downgrade shouldn't hide them — generating a page is not a
+		// dangerous write the way arbitrary host exec is.
+		if viewerOnly && info.Class != "read" && !alwaysAvailableTools[info.Name] {
 			continue
 		}
-		// MCP tools (mcp__<server>__<tool>, HLD-018) are general-purpose
-		// touchpoints discovered at runtime — they can't be pre-listed in a
-		// persona's Tools whitelist, so treat them as always-in-scope for
-		// every persona (coordinator + workers). The viewerOnly check above
-		// already dropped non-read (untrusted) MCP tools for viewers; the
-		// blacklist below still applies.
-		if strings.HasPrefix(info.Name, "mcp__") {
+		// Dynamic tools (runtime-discovered: MCP servers HLD-018, and any future
+		// installed skill / extension — identified by Origin, NOT a name prefix
+		// so this scales as those sources grow) can't be pre-listed in a
+		// persona's static Tools whitelist, so they're always in scope for every
+		// persona (coordinator + workers). The viewerOnly check above already
+		// dropped non-read (untrusted) dynamic tools; the blacklist still applies.
+		//
+		// History: we briefly excluded dynamic tools from the COORDINATOR (idea:
+		// force it to delegate, to stop it rabbit-holing through k8s tools for an
+		// ongrid-device question). The multi-turn sweep showed that BACKFIRED with
+		// the deployed weak model (zhipu): direct tool use is reliable but
+		// delegation is not, so the coordinator never reached the MCP tools at all
+		// — it fell back to `cloud_bash kubectl` (uninstalled) and couldn't answer
+		// "k8s namespaces". MCP became unreachable in chat. The real cause of the
+		// rabbit-hole is ROUTING (device≈node confusion), addressed in the
+		// coordinator system prompt, not by amputating the coordinator's reach.
+		if info.IsDynamic() {
 			if matchesAny(info.Name, blacklist) {
 				continue
 			}

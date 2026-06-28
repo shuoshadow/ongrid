@@ -77,11 +77,23 @@ func (t *ServePageTool) InvokableRun(ctx context.Context, argsJSON string, _ ...
 	if strings.TrimSpace(in.HTML) == "" {
 		return "", fmt.Errorf("serve_page: html is required")
 	}
-	id, url, err := t.store.SavePage(ctx, in.Title, in.HTML)
+	id, _, err := t.store.SavePage(ctx, in.Title, in.HTML)
 	if err != nil {
 		return "", fmt.Errorf("serve_page: %w", err)
 	}
-	t.log.Info("serve_page: hosted", slog.String("id", id), slog.String("url", url))
-	out, _ := json.Marshal(map[string]any{"id": id, "url": url})
+	// Hand the user the IN-APP artifact link, not the raw /api/pages read
+	// endpoint: pages are private (login required) and a bare API path 401s on a
+	// top-level click. /pages/<id> opens the page in the 产物 viewer, where the
+	// user is already authenticated — and where the 分享 button mints a public
+	// link if they need to send it off-platform.
+	viewURL := "/pages/" + id
+	t.log.Info("serve_page: hosted", slog.String("id", id), slog.String("url", viewURL))
+	out, _ := json.Marshal(map[string]any{
+		"id":  id,
+		"url": viewURL,
+		// Tell the model to render url as a Markdown link, not a bare path —
+		// so the user gets a clickable "查看页面" instead of /pages/<hash> text.
+		"note": "页面已生成。请用 Markdown 链接形式把它给用户（例如 [查看页面](" + viewURL + ")），不要只贴路径文本。页面需登录查看；要发给未登录的人，让用户去「产物」里点该页的「分享」按钮生成公开链接。",
+	})
 	return string(out), nil
 }

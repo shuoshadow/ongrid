@@ -172,12 +172,23 @@ const EDGE_COLOR: Record<string, string> = {
 
 // ---------- graph <-> canvas conversion -----------------------------------
 
+// graphNodeLabel picks the most descriptive label for a flow node: its given
+// name, else the specific tool it runs (config.tool, e.g. "get_edge_summary"),
+// else the bare node type. Keeps AI-generated graphs (which often leave name
+// empty + use single-letter ids) readable on the canvas and in run detail.
+function graphNodeLabel(n: { name?: string; type: string; config?: Record<string, unknown> }): string {
+  if (n.name) return n.name;
+  const tool = n.config?.tool;
+  if (typeof tool === 'string' && tool) return tool;
+  return n.type;
+}
+
 function toCanvas(graph: FlowGraph | undefined): { nodes: CanvasNode[]; edges: Edge[] } {
   const nodes: CanvasNode[] = (graph?.nodes ?? []).map((n, i) => ({
     id: n.id,
     type: 'flowNode',
     position: n.position ?? { x: 80 + i * 220, y: 160 },
-    data: { flowType: n.type, label: n.name || n.type, config: n.config ?? {} },
+    data: { flowType: n.type, label: graphNodeLabel(n), config: n.config ?? {} },
   }));
   const edges: Edge[] = (graph?.edges ?? []).map((e) => {
     const port = e.sourcePort || 'next';
@@ -579,9 +590,19 @@ export default function FlowEditorPage() {
           const r = await getFlowRun(runID);
           setActiveRun(r);
           applyRunToCanvas(r.nodes);
-          if (r.run.status !== 'running' && r.run.status !== 'pending' && pollRef.current) {
-            window.clearInterval(pollRef.current);
-            pollRef.current = null;
+          if (r.run.status !== 'running' && r.run.status !== 'pending') {
+            // Surface a terminal failure prominently in the toolbar banner —
+            // don't make the user dig into the run's node detail to learn it
+            // failed. Prefer the run-level error; fall back to the first failed
+            // node's error so there's always a reason.
+            if (r.run.status === 'failed') {
+              const nodeErr = r.nodes.find((n) => n.status === 'failed' && n.error)?.error;
+              setError(friendlyFlowError(r.run.error || nodeErr || tr('运行失败', 'Run failed'), tr));
+            }
+            if (pollRef.current) {
+              window.clearInterval(pollRef.current);
+              pollRef.current = null;
+            }
           }
         } catch {
           /* transient poll errors ignored */
@@ -590,7 +611,7 @@ export default function FlowEditorPage() {
       void tick();
       pollRef.current = window.setInterval(() => void tick(), 1500);
     },
-    [applyRunToCanvas]
+    [applyRunToCanvas, tr]
   );
 
   const onRun = useCallback(async () => {
@@ -628,6 +649,9 @@ export default function FlowEditorPage() {
   }, [flow, dirty, onSave, pollRun, runInputText, tr]);
 
   const hasManualTrigger = useMemo(() => nodes.some((n) => n.data.flowType === 'trigger.manual'), [nodes]);
+  // node id → descriptive canvas label, so the run detail shows "get_edge_summary"
+  // instead of the bare graph id ("a"/"b"/…) for unnamed AI-generated nodes.
+  const nodeLabelByID = useMemo(() => new Map(nodes.map((n) => [n.id, n.data.label])), [nodes]);
 
   const loadRuns = useCallback(async () => {
     try {
@@ -673,7 +697,7 @@ export default function FlowEditorPage() {
         <span className="shrink-0 rounded bg-zinc-800 px-1 py-0.5 text-[10px] text-zinc-500">v{flow.version}</span>
         {dirty && <span className="text-[11px] text-amber-500">{tr('未保存', 'Unsaved')}</span>}
         <div className="flex-1" />
-        {error && <span className="max-w-md truncate text-[12px] text-red-400">{error}</span>}
+        {error && <span title={error} className="max-w-md truncate text-[12px] text-red-400" role="alert">{error}</span>}
         <button
           type="button"
           onClick={() => setShowRuns((v) => !v)}
@@ -1000,7 +1024,7 @@ export default function FlowEditorPage() {
                 {activeRun.nodes.map((n) => (
                   <div key={`${n.node_id}`} className="rounded-md border border-zinc-800 p-2">
                     <div className="flex items-center justify-between">
-                      <span className="text-[12px] text-zinc-300">{n.node_name || n.node_id}</span>
+                      <span className="text-[12px] text-zinc-300">{n.node_name || nodeLabelByID.get(n.node_id) || n.node_id}</span>
                       <div className="flex items-center gap-1.5">
                         {n.fired_port && n.fired_port !== 'next' && (
                           <span
@@ -1021,14 +1045,14 @@ export default function FlowEditorPage() {
                     </div>
                     {nodePageURL(n.output) && (
                       <a
-                        href="/pages"
+                        href={nodePageURL(n.output) || '/pages'}
                         target="_blank"
                         rel="noreferrer"
                         onClick={(e) => e.stopPropagation()}
-                        title={tr('页面已托管（私有）— 在 运营→产物 里查看 / 分享', 'Page hosted (private) — view / share it under Operations → Artifacts')}
+                        title={tr('打开托管页面（私有，需登录）— 也可在 产物 里分享', 'Open the hosted page (private, login required) — or share it under Artifacts')}
                         className="mt-1.5 inline-flex items-center gap-1 rounded-md border border-indigo-500/40 bg-indigo-500/10 px-2 py-1 text-[11px] font-medium text-indigo-300 transition-colors hover:bg-indigo-500/20"
                       >
-                        <ExternalLink size={11} /> {tr('在「产物」中查看', 'View in Artifacts')}
+                        <ExternalLink size={11} /> {tr('打开生成的页面', 'Open the generated page')}
                       </a>
                     )}
                     {n.error && <div title={n.error} className="mt-1 break-all text-[11px] text-red-400">{friendlyFlowError(n.error, tr)}</div>}
@@ -1652,7 +1676,9 @@ function nodePageURL(output: unknown): string | null {
   const o = output as Record<string, unknown>;
   const result = o.result && typeof o.result === 'object' ? (o.result as Record<string, unknown>) : undefined;
   const cand = (result?.url ?? o.url) as unknown;
-  if (typeof cand === 'string' && (cand.startsWith('/api/pages/') || /^https?:\/\//.test(cand))) return cand;
+  // serve_page returns the in-app viewer route ("/pages/<id>"); also tolerate the
+  // raw API path and absolute URLs.
+  if (typeof cand === 'string' && (cand.startsWith('/pages/') || cand.startsWith('/api/pages/') || /^https?:\/\//.test(cand))) return cand;
   return null;
 }
 

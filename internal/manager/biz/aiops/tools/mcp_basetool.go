@@ -118,6 +118,7 @@ func (t *MCPTool) Info(_ context.Context) (*basetool.ToolInfo, error) {
 		WhenToUse:   "外部 MCP 服务「" + t.server + "」提供的能力。",
 		Parameters:  schema,
 		Class:       class,
+		Origin:      basetool.OriginMCP, // runtime-discovered → routed to specialists, not the coordinator
 	}, nil
 }
 

@@ -16,10 +16,10 @@ const TracesPage = lazy(() => import('@/pages/Traces'));
 const AlertsPage = lazy(() => import('@/pages/Alerts'));
 const AlertRulesPage = lazy(() => import('@/pages/AlertRules'));
 const IncidentDetailPage = lazy(() => import('@/pages/IncidentDetail'));
-const ReportsPage = lazy(() => import('@/pages/Reports'));
 const ReportDetailPage = lazy(() => import('@/pages/ReportDetail'));
-const ReportSchedulesPage = lazy(() => import('@/pages/ReportSchedules'));
+const TasksPage = lazy(() => import('@/pages/Tasks'));
 const PagesPage = lazy(() => import('@/pages/Pages'));
+const PageViewPage = lazy(() => import('@/pages/PageView'));
 const SkillsPage = lazy(() => import('@/pages/Skills'));
 const ApprovalsPage = lazy(() => import('@/pages/Approvals'));
 const SkillRunPage = lazy(() => import('@/pages/SkillRun'));
@@ -41,6 +41,8 @@ const SettingsNotifications = lazy(() => import('@/pages/settings/Notifications'
 const SettingsChannels = lazy(() => import('@/pages/settings/Channels'));
 const SettingsIntegrations = lazy(() => import('@/pages/settings/Integrations'));
 const SettingsPreferences = lazy(() => import('@/pages/settings/Preferences'));
+const SettingsAgent = lazy(() => import('@/pages/settings/Agent'));
+const SettingsAbout = lazy(() => import('@/pages/settings/About'));
 const SettingsSecrets = lazy(() => import('@/pages/settings/Secrets'));
 const SettingsHealth = lazy(() => import('@/pages/settings/Health'));
 const SettingsUpgrade = lazy(() => import('@/pages/settings/Upgrade'));
@@ -106,10 +108,14 @@ export default function App() {
         <Route path="/alerts" element={<AlertsPage />} />
         <Route path="/alerts/rules" element={<AlertRulesPage />} />
         <Route path="/alerts/incidents/:id" element={<IncidentDetailPage />} />
-        <Route path="/reports" element={<ReportsPage />} />
-        <Route path="/reports/schedules" element={<ReportSchedulesPage />} />
+        {/* 报告 folded into 产物's 报告 tab; schedules became 任务. Old links redirect. */}
+        <Route path="/reports" element={<Navigate to="/pages?tab=reports" replace />} />
+        <Route path="/reports/schedules" element={<Navigate to="/tasks" replace />} />
         <Route path="/reports/:id" element={<ReportDetailPage />} />
+        <Route path="/tasks" element={<TasksPage />} />
+        <Route path="/tasks/:id" element={<TasksPage />} />
         <Route path="/pages" element={<PagesPage />} />
+        <Route path="/pages/:id" element={<PagesPage />} />
         <Route path="/skills" element={<SkillsPage />} />
         <Route path="/approvals" element={<ApprovalsPage />} />
         <Route path="/skills/:key" element={<SkillRunPage />} />
@@ -161,7 +167,9 @@ export default function App() {
               ecosystem yet); reachable via /skills?tab=install URL only.
               Redirect kept for any operator-bookmarked old URL. */}
           <Route path="marketplace" element={<Navigate to="/skills?tab=install" replace />} />
+          <Route path="agent" element={<SettingsAgent />} />
           <Route path="preferences" element={<SettingsPreferences />} />
+          <Route path="about" element={<SettingsAbout />} />
         </Route>
         <Route path="/admin" element={<AdminLayout />}>
           <Route index element={<Navigate to="users" replace />} />
@@ -175,6 +183,18 @@ export default function App() {
             redirect so bookmarks keep working. */}
         <Route path="/audit" element={<Navigate to="/admin/audit" replace />} />
       </Route>
+      {/* Full-screen artifact viewer — opened in a NEW TAB from 产物's 打开 button.
+          Authed (token in localStorage, shared across tabs) but deliberately
+          OUTSIDE the Layout group so the hosted page fills the whole tab with no
+          sidebar/chrome. Clean URL (/pages/<id>/view) instead of a blob: URL. */}
+      <Route
+        path="/pages/:id/view"
+        element={
+          <RequireAuth>
+            <PageViewPage />
+          </RequireAuth>
+        }
+      />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

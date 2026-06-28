@@ -86,7 +86,8 @@ func genSystemPrompt(tools []ToolMeta) string {
 {"name":"<简短工作流名>","description":"<一句话说明>","graph":{"nodes":[...],"edges":[...]}}
 
 ## 图规则
-- nodes: [{"id":"<短id>","type":"<节点类型>","config":{...}}]，edges: [{"id":"<短id>","source":"<id>","target":"<id>","sourcePort":"<可选>"}]
+- nodes: [{"id":"<短id>","type":"<节点类型>","name":"<简短中文名>","config":{...}}]，edges: [{"id":"<短id>","source":"<id>","target":"<id>","sourcePort":"<可选>"}]
+- 每个节点都要给一个简短、能一眼看懂的 name（如「拉取设备摘要」「分析风险」「生成HTML」「托管网页」），它会显示在画布和运行记录里——不要省略，也不要只用单字母 id 当名字。
 - 必须有且仅有一个触发器节点做起点（默认 trigger.manual）。
 - 节点间用边连，下游用 {{nodes.<上游id>.output.<字段>}} 引用上游输出（写在 config 的字符串值里）。
 
@@ -125,7 +126,7 @@ func genSystemPrompt(tools []ToolMeta) string {
 	}
 	b.WriteString(`
 ## 示例（用户："巡检设备1的负载，生成网页报告"）
-{"name":"设备负载巡检报告","description":"取负载 → AI 生成 HTML → 托管网页","graph":{"nodes":[{"id":"t","type":"trigger.manual","config":{}},{"id":"a","type":"tool","config":{"tool":"get_host_load","args":{"device_ids":[1]}}},{"id":"b","type":"llm","config":{"system":"你是网页生成器，只输出完整HTML(<!DOCTYPE html>开头)，不要解释不要代码围栏","prompt":"根据负载数据生成一个报告网页：{{nodes.a.output.result}}"}},{"id":"c","type":"tool","config":{"tool":"serve_page","args":{"html":"{{nodes.b.output.answer}}","title":"设备负载报告"}}}],"edges":[{"id":"1","source":"t","target":"a"},{"id":"2","source":"a","target":"b"},{"id":"3","source":"b","target":"c"}]}}
+{"name":"设备负载巡检报告","description":"取负载 → AI 生成 HTML → 托管网页","graph":{"nodes":[{"id":"t","type":"trigger.manual","name":"手动触发","config":{}},{"id":"a","type":"tool","name":"拉取设备负载","config":{"tool":"get_host_load","args":{"device_ids":[1]}}},{"id":"b","type":"llm","name":"生成报告HTML","config":{"system":"你是网页生成器，只输出完整HTML(<!DOCTYPE html>开头)，不要解释不要代码围栏","prompt":"根据负载数据生成一个报告网页：{{nodes.a.output.result}}"}},{"id":"c","type":"tool","name":"托管网页","config":{"tool":"serve_page","args":{"html":"{{nodes.b.output.answer}}","title":"设备负载报告"}}}],"edges":[{"id":"1","source":"t","target":"a"},{"id":"2","source":"a","target":"b"},{"id":"3","source":"b","target":"c"}]}}
 
 只输出 JSON。工具名必须用上面列出的，参数符合其 schema。`)
 	return b.String()

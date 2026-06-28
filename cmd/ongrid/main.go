@@ -1984,15 +1984,36 @@ func main() {
 			Limiter:    aiopstoolsdec.NewTokenBucketLimiter(0),
 			Registerer: reg,
 		}
+		// serve_page + send_im_message are registered AFTER buildAIOpsRuntime
+		// (SetPageStore / SetIMSender above), so like cloud_bash they're absent
+		// from the startup chat bag and the LLM can't call them in chat — the
+		// exact reason the agent "never triggered serve_page". They're instant
+		// (no human-approval gate), so a short timeout, not cbDeps' 31m ceiling.
+		// First registration on reg here (not in the startup bag) → no
+		// double-register.
+		quickDeps := aiopstoolsdec.Deps{
+			Timeout:    60 * time.Second,
+			Limiter:    aiopstoolsdec.NewTokenBucketLimiter(0),
+			Registerer: reg,
+		}
 		chatRT.AppendToolBag([]aiopstoolsbase.BaseTool{
 			aiopstoolsdec.Wrap(aiopstools.NewCloudBashTool(cloudBashProposerShim{uc: approvalUC}, log), cbDeps),
 			aiopstoolsdec.Wrap(aiopstools.NewInstallSkillTool(installSkillProposerShim{uc: approvalUC}, log), cbDeps),
+			aiopstoolsdec.Wrap(aiopstools.NewServePageTool(pageStore, log), quickDeps),
+			aiopstoolsdec.Wrap(aiopstools.NewSendIMMessageTool(imSenderShim{channels: alertRepo, router: notifyRouter}, log), quickDeps),
 		})
-		log.Info("cloud_bash + install_skill bolted onto chat runtime bag", slog.Int("tool_count", chatRT.ToolCount()))
+		log.Info("cloud_bash + install_skill + serve_page + send_im_message bolted onto chat runtime bag", slog.Int("tool_count", chatRT.ToolCount()))
 		// HLD-017: wire the active-skill → bound-credentials resolver so
 		// cloud_bash auto-injects the credentials an active skill was bound
 		// to at install time (design-time binding, no run-time choice).
 		chatRT.SetCredentialBinder(mpUC)
+		// Admin write-action gate: consult the agent/write_enabled system
+		// setting live on every chat request. When an admin turns it off the
+		// agent goes read-only (all non-read tools stripped from the LLM's
+		// toolbag). Default (unset) resolves to enabled, preserving behaviour.
+		chatRT.SetAgentWriteEnabledProvider(func(ctx context.Context) bool {
+			return settingSvc.AgentWriteEnabled(ctx)
+		})
 		// HLD-018 P2: connect each enabled MCP server, pull its tools, and
 		// bolt each onto the toolbag as mcp__<server>__<tool>. Trusted
 		// servers' tools run synchronously; others queue to the approval
@@ -3017,6 +3038,16 @@ var coordinatorToolNames = []string{
 	"install_skill",
 	"draft_config_change",
 	"apply_config_change",
+	// Output/communication primitives — the coordinator is usually the one
+	// that just produced the HTML report or the message text, so let it host
+	// / send directly instead of bouncing through a specialist. Both are
+	// low-risk: serve_page only publishes an internal page, send_im_message
+	// only delivers to a pre-configured channel. Without these here the
+	// persona whitelist strips them out of the coordinator's session bag even
+	// though they're registered in the runtime toolbag (the exact reason the
+	// agent kept saying "I don't have a serve_page tool").
+	"serve_page",
+	"send_im_message",
 }
 
 // Heavy on parameters because every dep flows through this site
@@ -3787,6 +3818,9 @@ func (s *flowToolInvoker) mergeBag(bag *aiopstools.ToolBag) {
 }
 
 func (s *flowToolInvoker) InvokeTool(ctx context.Context, name string, args json.RawMessage) (json.RawMessage, error) {
+	// Tag any artifact a tool node produces (serve_page) as workflow-sourced so
+	// the operations UI's 生成来源 column distinguishes it from chat-generated pages.
+	ctx = aiopstoolsbase.WithArtifactSource(ctx, aiopstoolsbase.ArtifactSourceWorkflow)
 	// MCP tool nodes dispatch LIVE through the mcp source (resolve the current
 	// server/tool, run directly without an approval card — placing the node in
 	// a published flow IS the human authorization; a per-run inbox approval is
@@ -4148,13 +4182,17 @@ type pageMeta struct {
 	CreatedAt string `json:"created_at"` // RFC3339
 	URL       string `json:"url"`
 	SizeBytes int64  `json:"size_bytes,omitempty"`
+	// Source is the origin code ("chat" / "workflow") stamped via ctx at
+	// generation time — drives the operations UI's 生成来源 column. Empty for
+	// legacy pages written before this field existed.
+	Source string `json:"source,omitempty"`
 }
 
 // SavePage hosts an assistant-generated HTML page under its own directory
 // (pages/<id>/index.html) with a meta.json sidecar — so the operations UI can
 // list / preview / delete it, and a page can ship assets later. The random id
 // is the capability.
-func (s filePageStore) SavePage(_ context.Context, title, html string) (string, string, error) {
+func (s filePageStore) SavePage(ctx context.Context, title, html string) (string, string, error) {
 	var rb [12]byte
 	if _, err := crand.Read(rb[:]); err != nil {
 		return "", "", fmt.Errorf("rand: %w", err)
@@ -4168,7 +4206,7 @@ func (s filePageStore) SavePage(_ context.Context, title, html string) (string, 
 		return "", "", fmt.Errorf("write page: %w", err)
 	}
 	url := "/api/pages/" + id
-	meta := pageMeta{ID: id, Title: strings.TrimSpace(title), CreatedAt: time.Now().UTC().Format(time.RFC3339), URL: url, SizeBytes: int64(len(html))}
+	meta := pageMeta{ID: id, Title: strings.TrimSpace(title), CreatedAt: time.Now().UTC().Format(time.RFC3339), URL: url, SizeBytes: int64(len(html)), Source: aiopstoolsbase.ArtifactSourceFromContext(ctx)}
 	if mb, err := json.Marshal(meta); err == nil {
 		_ = os.WriteFile(filepath.Join(dir, "meta.json"), mb, 0o644)
 	}

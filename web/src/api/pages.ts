@@ -11,6 +11,7 @@ export type HostedPage = {
   created_at: string;
   url: string; // /api/pages/<id> (authed)
   size_bytes?: number;
+  source?: string; // origin code: 'chat' | 'workflow' | '' (legacy)
 };
 
 export function listPages() {

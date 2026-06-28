@@ -50,6 +50,9 @@ func mockMCP(authSeen *string, mu *sync.Mutex) *httptest.Server {
 				"description":  "echo back the input",
 				"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"msg": map[string]any{"type": "string"}}},
 			}}})
+		case "tools/call":
+			// Fixed marker so a flow-node test can assert the round-trip.
+			mcpWriteRPC(w, req.ID, map[string]any{"content": []map[string]any{{"type": "text", "text": "echo-ok-T3"}}})
 		default:
 			http.Error(w, "unknown method", http.StatusBadRequest)
 		}

@@ -245,6 +245,13 @@ type Config struct {
 	// + Budget are filled at construction.
 	CallbackDeps callbacks.Deps
 
+	// AgentWriteEnabled, when set, is consulted live (per request) to decide
+	// whether the agent may use write/mutating tools. Returning false forces a
+	// read-only toolbag (same filter as a viewer): every Class!="read" tool is
+	// stripped before the LLM sees it. nil = always enabled (no gate), so an
+	// unwired runtime keeps full behaviour.
+	AgentWriteEnabled func(ctx context.Context) bool
+
 	// Logger may be nil.
 	Logger *slog.Logger
 }
@@ -333,6 +340,18 @@ func (rt *Runtime) SetCredentialBinder(b CredentialBinder) {
 		return
 	}
 	rt.cfg.CredentialBinder = b
+}
+
+// SetAgentWriteEnabledProvider wires the live write-action gate (an admin
+// system_settings toggle). fn is consulted per request; returning false forces
+// a read-only toolbag. nil clears the gate (always enabled). Post-construction
+// setter so cmd/ongrid can hand in a closure over the setting service after the
+// runtime is built.
+func (rt *Runtime) SetAgentWriteEnabledProvider(fn func(ctx context.Context) bool) {
+	if rt == nil {
+		return
+	}
+	rt.cfg.AgentWriteEnabled = fn
 }
 
 // SetToolBag wires the unredacted ToolBag handle onto the Runtime so
@@ -525,7 +544,18 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (*Reply, error) {
 	// no persona is loaded, so the LLM never sees host_bash / AgentTool /
 	// restart_service via the viewer's chat session.
 	viewerOnly := req.Role == "viewer"
-	if viewerOnly {
+	// Global write-action gate (admin setting, consulted live per request):
+	// when disabled, force the same read-only toolbag a viewer gets — strip
+	// every Class!="read" tool before the LLM sees it, so even the
+	// propose-confirm writes (cloud_bash, apply_config_change, serve_page,
+	// AgentTool dispatch, host_restart_service, …) are unavailable. A nil
+	// provider means "no gate" → enabled, preserving full behaviour.
+	writeEnabled := true
+	if rt.cfg.AgentWriteEnabled != nil {
+		writeEnabled = rt.cfg.AgentWriteEnabled(ctx)
+	}
+	readOnly := viewerOnly || !writeEnabled
+	if readOnly {
 		sessionToolBag = filterToolsForAgentRole(rt.cfg.ToolBag, nil, isCoordinator, true)
 	}
 	// Resolve the active persona. Sessions with no AgentID still
@@ -549,7 +579,7 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (*Reply, error) {
 			// reach for every deep-dive tool itself. The
 			// coordinatorOnlyTools (AgentTool/SendMessage/TaskStop)
 			// survive the strip via isCoordinator=true.
-			sessionToolBag = filterToolsForAgentRole(rt.cfg.ToolBag, persona, isCoordinator, viewerOnly)
+			sessionToolBag = filterToolsForAgentRole(rt.cfg.ToolBag, persona, isCoordinator, readOnly)
 			agentReminderForPersona = persona.CriticalReminder
 		} else if rt.log != nil && personaName != "default" {
 			rt.log.Info("chatruntime: session agent_id not in registry — using default",
@@ -692,6 +722,14 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (*Reply, error) {
 	// agent workspace at exec time (files persist across commands in a session
 	// instead of running in a throwaway temp dir).
 	ctx = basetool.WithSessionID(ctx, sess.ID)
+	// Tag artifacts produced in this turn (serve_page) as chat-sourced so the
+	// operations UI's 生成来源 column can tell assistant pages from workflow pages.
+	ctx = basetool.WithArtifactSource(ctx, basetool.ArtifactSourceChat)
+	// Forward the admin write gate to host_bash: when ON, the tool tells the
+	// edge to bypass cmdpolicy and run the raw command. `writeEnabled` was
+	// resolved above (same value that gated the toolbag); reuse it so a single
+	// setting read drives both tool exposure and host-command authority.
+	ctx = basetool.WithHostWriteAllowed(ctx, writeEnabled)
 	// Always autoheal any in-flight tool batch on the way out — covers
 	// the "user closed browser mid-tool-batch" case the in-session
 	// ChatModel.OnStart flush can't reach. Defer with a background-rooted

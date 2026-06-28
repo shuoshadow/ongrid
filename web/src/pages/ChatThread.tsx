@@ -572,7 +572,7 @@ export default function ChatThreadPage() {
               onSubmit={(p: SubmitPayload) => void send(p.text, p.mentions)}
               disabled={submitting}
               autoFocus
-              placeholder={tr('继续聊…  按 ⌘↵ 换行', 'Continue the conversation… press ⌘↵ for newline')}
+              placeholder={tr('继续聊…  Shift+Enter 换行', 'Continue the conversation… Shift+Enter for newline')}
               providers={providers}
               selectedModel={selectedModel}
               onModelChange={setStoreModel}
