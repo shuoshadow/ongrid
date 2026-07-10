@@ -330,6 +330,17 @@ func (r *Repo) DeleteOfflineWithLinkedEdges(ctx context.Context, id uint64) erro
 			return err
 		}
 		edgeIDs := uniqueEdgeIDs(links)
+		if len(edgeIDs) > 0 {
+			var onlineEdges int64
+			if err := tx.Model(&edgemodel.Edge{}).
+				Where("id IN ? AND status = ?", edgeIDs, edgemodel.StatusOnline).
+				Count(&onlineEdges).Error; err != nil {
+				return err
+			}
+			if onlineEdges > 0 {
+				return fmt.Errorf("%w: linked edge must be offline before device deletion", errs.ErrConflict)
+			}
+		}
 		for _, edgeID := range edgeIDs {
 			res := tx.Unscoped().Model(&edgemodel.Edge{}).
 				Where("id = ?", edgeID).

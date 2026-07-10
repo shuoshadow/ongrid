@@ -212,6 +212,43 @@ func TestDeleteOfflineWithLinkedEdgesRejectsOnlineDevice(t *testing.T) {
 	}
 }
 
+func TestDeleteOfflineWithLinkedEdgesRejectsOnlineLinkedEdge(t *testing.T) {
+	db := newDeviceTestDB(t)
+	if err := db.AutoMigrate(&edgemodel.Edge{}); err != nil {
+		t.Fatalf("AutoMigrate edges: %v", err)
+	}
+	repo := NewRepo(db)
+	links := NewEdgeDeviceRepo(db)
+	ctx := context.Background()
+
+	dev, err := repo.FindOrCreateByFingerprint(ctx, sampleDevice("delete-stale-offline"))
+	if err != nil {
+		t.Fatalf("create device: %v", err)
+	}
+	edge := &edgemodel.Edge{AccessKeyID: "ak-delete-online-edge", SecretKeyHash: "secret-hash", Status: edgemodel.StatusOnline}
+	if err := db.Create(edge).Error; err != nil {
+		t.Fatalf("create edge: %v", err)
+	}
+	if err := links.Link(ctx, edge.ID, dev.ID, model.EdgeDeviceRelationHost); err != nil {
+		t.Fatalf("link edge: %v", err)
+	}
+
+	err = repo.DeleteOfflineWithLinkedEdges(ctx, dev.ID)
+	if !errors.Is(err, errs.ErrConflict) {
+		t.Fatalf("DeleteOfflineWithLinkedEdges linked online edge err = %v, want ErrConflict", err)
+	}
+	if _, err := repo.Get(ctx, dev.ID); err != nil {
+		t.Fatalf("device should still exist: %v", err)
+	}
+	var gotEdge edgemodel.Edge
+	if err := db.First(&gotEdge, edge.ID).Error; err != nil {
+		t.Fatalf("linked edge should still exist: %v", err)
+	}
+	if gotEdge.AccessKeyID != edge.AccessKeyID || gotEdge.SecretKeyHash != edge.SecretKeyHash {
+		t.Fatalf("linked edge credentials changed: access=%q secret=%q", gotEdge.AccessKeyID, gotEdge.SecretKeyHash)
+	}
+}
+
 func TestDeleteOfflineWithLinkedEdgesCleansEdgesAndCredentials(t *testing.T) {
 	db := newDeviceTestDB(t)
 	if err := db.AutoMigrate(&edgemodel.Edge{}); err != nil {
