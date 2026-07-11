@@ -2,6 +2,6 @@
 
 <!-- Describe what changed and why. -->
 
-## Checks
+## Author confirmation
 
 - [ ] I have read and agree to the project contribution guide in CONTRIBUTING.md.
